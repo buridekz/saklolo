@@ -177,7 +177,14 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
     return () => window.removeEventListener('keydown', onKey);
   }, [visible, incident?.id, selected, drawerOpen]);
 
-  const choose = useCallback((id: string) => { setSelected(id); setDrawerOpen(true); }, []);
+  const workspaceRef = useRef<HTMLDivElement>(null);
+  const choose = useCallback((id: string) => {
+    setSelected(id); setDrawerOpen(true);
+    // On wide screens, bring the whole workspace into view so the drawer's action buttons are on screen.
+    if (window.matchMedia('(min-width: 900px)').matches) {
+      requestAnimationFrame(() => workspaceRef.current?.scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' }));
+    }
+  }, []);
   const closeDrawer = useCallback(() => {
     // If focus was inside the drawer, hand it back to the report's queue row instead of losing it.
     const focusInside = drawerRef.current?.contains(document.activeElement);
@@ -201,7 +208,8 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
     try {
       const saved = await api<Report>(`/api/reports/${report.id}/dispatch`, { method: 'POST', body: JSON.stringify(agency ? { agency, stage } : { stage }) });
       setReports(list => list.map(item => item.id === saved.id ? saved : item));
-      pushToast({ tone: 'success', title: `${stageLabels[stage]} · #${shortId(report)}`, body: `Simulated for ${agencyNames[saved.dispatch!.agency]}. No real agency was contacted.` });
+      // Only the hand-off itself gets a notice; later stages are visible in the panel.
+      if (stage === 'notified') pushToast({ tone: 'success', title: `${agencyNames[saved.dispatch!.agency]} notified · #${shortId(report)}`, body: 'Simulated. No real agency was contacted.' });
       return true;
     } catch (cause) {
       pushToast({ tone: 'error', title: 'Dispatch not saved', body: cause instanceof Error ? cause.message : 'Try again.' });
@@ -295,7 +303,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
 
         {error && <div className="ops-alert" role="alert"><WifiOff size={16} />{error}</div>}
 
-        <div className="ops-workspace">
+        <div className="ops-workspace" ref={workspaceRef}>
           <aside className="ops-queue" aria-label="Incident queue">
             <div className="ops-queue-inner">
               <div className="ops-queue-tools">
@@ -464,7 +472,8 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
         }}
       />
 
-      <div className="ops-toasts" role="status" aria-live="polite">
+      {/* Keep notices clear of the open drawer so they never cover its action buttons. */}
+      <div className="ops-toasts" role="status" aria-live="polite" style={insetRight ? { right: insetRight + 52 } : undefined}>
         {toasts.map(toast => <ToastItem key={toast.id} toast={toast} onDismiss={dismissToast} />)}
       </div>
     </div>

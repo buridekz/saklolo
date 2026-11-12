@@ -1201,6 +1201,13 @@
 @media (hover: hover) and (pointer: fine) { .ops-sms-open:hover { background: #f2f5ef; } }
 
 .ops-sms-dialog {
+  /* The CSS reset removes the browser's dialog centring; restore it. */
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  height: fit-content;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
   width: min(520px, calc(100vw - 32px));
   padding: 0;
   border: 1px solid var(--ops-line);
