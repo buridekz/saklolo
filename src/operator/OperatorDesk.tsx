@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { io } from 'socket.io-client';
 import {
-  ArrowRight, BadgeCheck, Check, CheckCheck, CircleDashed, Flag, MapPinCheck, Phone, RotateCcw, Users, Clock3, Copy, ExternalLink, Inbox, LayoutDashboard, LoaderCircle,
+  ArrowRight, BadgeCheck, Check, CheckCheck, CircleDashed, Flag, MapPinCheck, MessageSquareText, Phone, RotateCcw, Users, Clock3, Copy, ExternalLink, Inbox, LayoutDashboard, LoaderCircle,
   MapPin, Mic, Plus, Radio, RefreshCw, Search, ShieldCheck, Smartphone, Timer, Truck, Wifi, WifiOff, X,
 } from 'lucide-react';
 import { agencyNames, api, categories, dispatchStages, stageLabels, type Agency, type Category, type DispatchStage, type Report } from '../data';
 import IncidentMap from './IncidentMap';
+import SmsImport from './SmsImport';
 import { useCountUp, useMediaQuery, useNow } from './hooks';
 import {
   CATEGORY_ICONS, STALE_LOCATION_MS, age, ageLabel, clockTime, fullTime, isOpen, locationLine, prefersReducedMotion,
@@ -43,6 +44,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
   const lastShown = useRef<Report | undefined>(undefined);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [smsOpen, setSmsOpen] = useState(false);
   const wide = useMediaQuery('(min-width: 900px)');
 
   const pushToast = useCallback((toast: Omit<Toast, 'id'>) => {
@@ -148,6 +150,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (document.querySelector('dialog[open]')) return; // The SMS dialog owns the keyboard while open.
       const target = event.target as HTMLElement | null;
       if (target?.closest('input, textarea, select, [contenteditable="true"], .leaflet-container')) {
         if (event.key === 'Escape' && target === searchRef.current) searchRef.current.blur();
@@ -299,6 +302,9 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                 <div className="ops-queue-title">
                   <h2>Incoming reports</h2>
                   <span className="ops-count">{reports.length}</span>
+                  <button type="button" className="ops-sms-open" onClick={() => setSmsOpen(true)} title="Log a report that arrived by text message">
+                    <MessageSquareText size={14} />Log SMS
+                  </button>
                 </div>
                 <label className="ops-search">
                   <Search size={16} aria-hidden />
@@ -368,7 +374,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                               <span className="ops-report-place">{locationLine(report)}</span>
                               <span className="ops-report-meta">
                                 <StatusPill report={report} />
-                                <span className="ops-source">{report.source === 'voice' ? <Mic size={12} /> : <Smartphone size={12} />}{sourceLabel(report)}</span>
+                                <span className="ops-source">{report.source === 'voice' ? <Mic size={12} /> : report.source === 'sms' ? <MessageSquareText size={12} /> : <Smartphone size={12} />}{sourceLabel(report)}</span>
                                 {(report.revision || 1) > 1 && <span className="ops-source">Rev {report.revision}</span>}
                                 {(nearbyCounts.get(report.id) || 0) > 0 && (
                                   <span className="ops-source ops-corroborated" title="Other reports within 300 m and an hour">+{nearbyCounts.get(report.id)} nearby</span>
@@ -441,6 +447,22 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
         <span>Saklolo · Manila Hack prototype</span>
         <span>Acknowledgement records review only. It never dispatches responders.</span>
       </footer>
+
+      <SmsImport
+        open={smsOpen}
+        onClose={() => setSmsOpen(false)}
+        onError={message => pushToast({ tone: 'error', title: 'SMS report not logged', body: message })}
+        onLogged={(report, created) => {
+          // Record it as known so the next poll does not announce it a second time.
+          known.current?.set(report.id, report.revision || 1);
+          setReports(list => list.some(item => item.id === report.id) ? list.map(item => item.id === report.id ? report : item) : [report, ...list]);
+          markFresh([report.id]);
+          reveal(report.id);
+          pushToast(created
+            ? { tone: 'success', title: `SMS report logged · #${shortId(report)}`, body: 'If the phone reconnects later, this same report will update.' }
+            : { tone: 'info', title: `Already in the queue · #${shortId(report)}`, body: 'This report had already arrived. Opened the existing one.' });
+        }}
+      />
 
       <div className="ops-toasts" role="status" aria-live="polite">
         {toasts.map(toast => <ToastItem key={toast.id} toast={toast} onDismiss={dismissToast} />)}

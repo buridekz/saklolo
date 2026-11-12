@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
-import { ArrowRight, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Truck, Volume2, VolumeX, Waves, WifiOff } from 'lucide-react';
+import { ArrowRight, Check, Copy, MessageSquareText, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Truck, Volume2, VolumeX, Waves, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -9,6 +9,29 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { agencyNames, categories, db, dispatchStages, editReport, labels, stageLabels, syncReports, type Category, type Report } from './data';
 import { useDeviceLocation } from './useDeviceLocation';
+import { smsBody, smsHref } from './sms';
+
+/** Optional LGU hotline for the SMS fallback. Left blank, the resident chooses the recipient. */
+const SMS_NUMBER = (import.meta.env.VITE_SMS_FALLBACK_NUMBER as string | undefined) || '';
+
+/** Offline fallback: hand the report to the phone's own SMS app, which works without mobile data. */
+function SmsFallback({ report }: { report: Report }) {
+  const [copied, setCopied] = useState(false);
+  const [opened, setOpened] = useState(false);
+  const body = smsBody(report);
+  async function copy() {
+    try { await navigator.clipboard.writeText(body); setCopied(true); window.setTimeout(() => setCopied(false), 1800); }
+    catch { setCopied(false); }
+  }
+  return <div className="sms-fallback" data-arrive>
+    <div className="sms-fallback-copy"><MessageSquareText size={18} /><div><strong>No data signal?</strong><p>Send this request as a text message. SMS often gets through when mobile data doesn’t.</p></div></div>
+    <div className="sms-actions">
+      <Button asChild className="sms-send"><a href={smsHref(body, SMS_NUMBER)} onClick={() => setOpened(true)}><MessageSquareText size={17} />Send by SMS</a></Button>
+      <Button variant="outline" className="sms-copy" onClick={() => void copy()}>{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? 'Copied' : 'Copy text'}</Button>
+    </div>
+    <small role="status">{opened ? 'Your messaging app opened with the report filled in. We’ll still deliver it over data when signal returns. The desk won’t get a duplicate.' : SMS_NUMBER ? `Goes to the LGU hotline ${SMS_NUMBER}.` : 'Choose your LGU or barangay hotline as the recipient.'}</small>
+  </div>;
+}
 import type { VoiceReportState, VoiceStatus, VoiceTranscript } from './voice';
 import './resident.css';
 import LocationPreview from './LocationPreview';
@@ -280,7 +303,7 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
       </div>
       <Tabs value={tab} onValueChange={setTab} className="phone-tabs">
         <TabsContent value="help" className="phone-tab-content">
-          <div className={`resident-connection ${connected ? '' : 'is-offline'}`} role="status">{connected ? <span className="online-dot" /> : <WifiOff size={15} />}<span>{connected ? 'Demo desk reachable' : 'Offline · requests wait on this phone'}</span></div>
+          <div className={`resident-connection ${connected ? '' : 'is-offline'}`} role="status">{connected ? <span className="online-dot" /> : <WifiOff size={15} />}{connected ? <span>Demo desk reachable</span> : <span><strong>Offline. SOS still works.</strong> Requests are saved on this phone and send themselves when signal returns.</span>}</div>
           {voiceState !== 'idle' && <section className={`resident-voice-session companion-session ${voiceStatus === 'speaking' && !muted ? 'is-speaking' : ''}`} aria-label="Live voice companion">
             <div className="voice-session-heading"><Mic size={20} /><h2>Saklolo voice companion</h2><Badge variant="outline">{voiceState === 'active' ? 'Live' : 'Connecting'}</Badge></div>
             <div className="companion-turn"><span className="companion-symbol">{muted ? <MicOff size={30} /> : voiceStatus === 'speaking' ? <Volume2 size={30} /> : <Mic size={30} />}</span><p className="voice-session-status" role="status">{voiceLabel}</p><p className="voice-session-note">{voiceState === 'connecting' ? 'Allow microphone access to start.' : muted ? 'Your microphone is off. You can still hear the assistant.' : 'Speak naturally. Add details or ask for your request status.'}</p></div>
@@ -303,6 +326,7 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
               { name: 'Resolved', done: dispatchStep >= 3, detail: stageTime('resolved') || 'Not yet' }
             ].map(step => <li key={step.name} className={step.done ? 'is-complete' : ''}><span>{step.done ? <Check size={14} /> : <span />}</span><div><strong>{step.name}</strong><small>{step.detail}</small></div></li>)}</ol>
             {currentReport.needsSync && <p className="request-update-pending">New details saved on this phone. Waiting to deliver the update.</p>}
+            {currentReport.status === 'pending' && <SmsFallback report={currentReport} />}
             <div className="request-location-note"><MapPin size={16} /><span>{currentReport.location ? 'Location included' : currentReport.landmark ? `Landmark: ${currentReport.landmark}` : 'Location missing — add a landmark below'}</span></div>
             <Button variant="outline" className="request-add-info" onClick={openDetails}><Plus size={18} />Add information<ArrowRight size={16} /></Button>
             {currentReport.status === 'pending' && <Button variant="ghost" className="request-retry" disabled={busy} onClick={() => void syncReports()}><RefreshCw size={16} />Retry delivery</Button>}

@@ -76,6 +76,7 @@ export function trustSignals(report: Report, nearby: number, now: number): Signa
   }
 
   if (report.source === 'voice') signals.push({ id: 'source', state: 'strong', label: 'Spoken report', detail: 'Created in a live voice session.' });
+  else if (report.source === 'sms') signals.push({ id: 'source', state: 'partial', label: 'Arrived by SMS', detail: 'Sent without mobile data. GPS is from when the phone saved it.' });
   else if (report.source === 'sos') signals.push({ id: 'source', state: 'partial', label: 'One-tap SOS', detail: 'Fast to send, so fewer details are expected.' });
   else signals.push({ id: 'source', state: 'partial', label: 'Written report', detail: 'Submitted through the report form.' });
 

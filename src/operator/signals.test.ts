@@ -36,6 +36,7 @@ test('corroboration, revisions and voice add strong signals', () => {
   assert.equal(state(base({ revision: 3 }), 'revision'), 'strong');
   assert.equal(state(base(), 'revision'), undefined);
   assert.equal(state(base({ source: 'voice' }), 'source'), 'strong');
+  assert.equal(state(base({ source: 'sms' }), 'source'), 'partial');
 });
 
 test('nearby reports are limited by distance and time', () => {

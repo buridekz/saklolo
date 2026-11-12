@@ -214,3 +214,17 @@ test('simulated dispatch requires review, only moves forward, and is always mark
     assert.equal(edited.dispatch.stage, 'resolved', 'resident edits keep the dispatch record');
   });
 });
+
+test('a report logged from SMS is not duplicated when the phone later delivers it over data', async () => {
+  await runServer({}, async base => {
+    const send = (url, method, data) => fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const shared = { id: randomUUID(), createdAt: new Date().toISOString(), category: 'Flood', landmark: 'Test bridge', location: { lat: 14.55, lng: 121.02, accuracy: 20 } };
+    const viaSms = await send('/api/reports', 'POST', { ...shared, description: 'Water rising', source: 'sms' });
+    assert.equal(viaSms.status, 201);
+    await send(`/api/reports/${shared.id}/acknowledge`, 'POST', {});
+    const viaData = await (await send('/api/reports', 'POST', { ...shared, description: 'Water rising', source: 'sos' })).json();
+    assert.equal(viaData.source, 'sms', 'the first arrival is kept');
+    assert.equal(viaData.status, 'acknowledged', 'the phone learns the desk already reviewed it');
+    assert.equal((await (await fetch(base + '/api/reports')).json()).length, 1);
+  });
+});

@@ -2,7 +2,7 @@ import Dexie, { type Table } from 'dexie';
 export const categories = ['Medical', 'Fire', 'Safety', 'Flood', 'Other'] as const;
 export type Category = typeof categories[number];
 export type Coordinates = { lat: number; lng: number; accuracy: number | null };
-export type Report = { id: string; createdAt: string; category: Category; description: string; landmark: string; location: Coordinates | null; locationCapturedAt?: string | null; revision?: number; needsSync?: boolean; source: 'sos' | 'form' | 'voice'; status: 'pending' | 'delivered' | 'acknowledged'; receivedAt?: string; acknowledgedAt?: string | null; deliveryError?: string; dispatch?: Dispatch | null; dispatchHistory?: Dispatch[] };
+export type Report = { id: string; createdAt: string; category: Category; description: string; landmark: string; location: Coordinates | null; locationCapturedAt?: string | null; revision?: number; needsSync?: boolean; source: 'sos' | 'form' | 'voice' | 'sms'; status: 'pending' | 'delivered' | 'acknowledged'; receivedAt?: string; acknowledgedAt?: string | null; deliveryError?: string; dispatch?: Dispatch | null; dispatchHistory?: Dispatch[] };
 /** DEMO ONLY: simulated responder dispatch set by the operator desk. No agency is ever contacted. */
 export const dispatchStages = ['notified', 'en_route', 'on_scene', 'resolved'] as const;
 export type DispatchStage = typeof dispatchStages[number];

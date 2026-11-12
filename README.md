@@ -52,7 +52,7 @@ When a new build is ready, the app offers **Reload app** or **Later** so edits a
 | Map background | Uses online OpenStreetMap tiles. Offline tile packaging is not implemented. |
 | GPS | Automatically requests browser permission on the resident screen. Denial opens the landmark form. Known coordinates retain their capture timestamp, with a stale-location label after two minutes. A denied or unavailable location is never replaced with fabricated coordinates. |
 | Local Wi-Fi delivery | Architecturally possible with a reachable local backend; multi-device HTTPS/network setup is not provided by the default loopback configuration. |
-| SMS or peer relay | Not implemented. |
+| SMS fallback | When a report is not delivered, the resident can send it as a text through the phone's own SMS app (works without mobile data). There is no SMS gateway: the operator pastes received texts into **Log SMS**. The report keeps its ID, so a later data delivery updates it instead of duplicating it. Peer relay is not implemented. |
 | Wake word / locked-screen voice | Not implemented. Voice requires opening and starting an app session. |
 
 The default servers bind to loopback for a local demo. A phone accessing a laptop's plain HTTP LAN address will not have the same secure-context privileges as localhost: microphone, geolocation, and service-worker behavior require a properly trusted HTTPS setup. A public tunnel is an internet dependency, not an offline transport solution.

@@ -15,7 +15,7 @@ const reportSchema = z.object({
   id: z.string().uuid(), createdAt: z.string().datetime(),
   ...editableFields,
   revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER).default(1),
-  source: z.enum(['sos', 'form', 'voice'])
+  source: z.enum(['sos', 'form', 'voice', 'sms'])
 });
 const patchSchema = z.object({ ...editableFields }).partial().extend({ revision: z.number().int().min(2).max(Number.MAX_SAFE_INTEGER) }).strict().refine(value => Object.keys(value).some(key => key !== 'revision'), { message: 'Include a report field to update.' });
 function voiceFailure(status, upstreamCode) {

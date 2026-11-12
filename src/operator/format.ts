@@ -42,7 +42,7 @@ export const locationLine = (report: Report) =>
   report.landmark || (report.location ? 'GPS location shared' : 'Location needs confirmation');
 
 export const sourceLabel = (report: Report) =>
-  report.source === 'voice' ? 'Voice' : report.source === 'sos' ? 'SOS' : 'Form';
+  report.source === 'voice' ? 'Voice' : report.source === 'sos' ? 'SOS' : report.source === 'sms' ? 'SMS' : 'Form';
 
 export type VerificationStatus = 'unverified' | 'confirmed' | 'corroborated' | 'field_checked' | 'flagged';
 export type Verification = { status: VerificationStatus; note: string; updatedAt: string };
