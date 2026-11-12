@@ -11,6 +11,10 @@ import { agencyNames, categories, db, dispatchStages, editReport, labels, stageL
 import { useDeviceLocation } from './useDeviceLocation';
 import { smsBody, smsHref } from './sms';
 
+/** After an online SOS, open the voice call-taker automatically. Off: SOS shows typed quick questions, with voice one tap away. */
+const AUTO_VOICE_AFTER_SOS = false;
+const PEOPLE_OPTIONS = ['1', '2', '3–5', 'More than 5', 'Not sure'];
+
 /** Optional LGU hotline for the SMS fallback. Left blank, the resident chooses the recipient. */
 const SMS_NUMBER = (import.meta.env.VITE_SMS_FALLBACK_NUMBER as string | undefined) || '';
 
@@ -42,6 +46,14 @@ const time = (value: string) => new Date(value).toLocaleTimeString([], { hour: '
 export default function Resident({ connected }: { connected: boolean; openDesk: () => void }) {
   const [category, setCategory] = useState<Category>('Other');
   const [description, setDescription] = useState('');
+  const [intake, setIntake] = useState<{ id: string; step: number } | null>(null);
+  const [intakeNote, setIntakeNote] = useState('');
+  const [intakePeople, setIntakePeople] = useState('');
+  const intakeCard = useRef<HTMLElement>(null);
+  // Keep the current question on screen as the resident moves through the three steps.
+  useEffect(() => {
+    if (intake && intake.step < 3) requestAnimationFrame(() => intakeCard.current?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
+  }, [intake]);
   const [landmark, setLandmark] = useState('');
   const gps = useDeviceLocation();
   const location = gps.location;
@@ -122,6 +134,23 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     activeReport.current = null; trackingReport.current = null; voiceReport.current = null; setActiveId(null);
     localStorage.removeItem('saklolo-active-report');
     setCategory('Other'); setDescription(''); setLandmark(''); setMessage(''); setDetailsOpen(false); setLocationOpen(false);
+    setIntake(null); setIntakeNote(''); setIntakePeople('');
+  }
+
+  /** Typed call-taker: what happened, how many people, nearest landmark. Each answer updates the same report. */
+  async function answerIntake(next: { category?: Category; note?: string; people?: string; landmark?: string }, advanceTo: number) {
+    if (!intake) return;
+    const nextCategory = next.category ?? category;
+    const note = (next.note ?? intakeNote).trim();
+    const people = next.people ?? intakePeople;
+    const place = (next.landmark ?? landmark).trim();
+    const text = [note, people && `People needing help: ${people}`].filter(Boolean).join('. ');
+    setCategory(nextCategory); setDescription(text); setLandmark(place);
+    if (next.people !== undefined) setIntakePeople(next.people);
+    setIntake({ id: intake.id, step: advanceTo });
+    try { await submit(nextCategory, text, place, 'form'); }
+    catch { setMessage('Your answer is saved on this phone and will be sent with the request.'); }
+    if (advanceTo >= 3 && mounted.current) setMessage('Thanks. The desk has your answers and your location.');
   }
 
   function openDetails() {
@@ -244,7 +273,9 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
       root.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
       // Like dialling an emergency line: when online, SOS goes straight to the voice call-taker,
       // which fills in this same report. Offline, SOS stays a one-tap save.
-      if (source === 'sos' && connected && voiceState === 'idle') void toggleVoice({ category, description: description.trim(), landmark: landmark.trim() });
+      if (source === 'sos' && AUTO_VOICE_AFTER_SOS && connected && voiceState === 'idle') void toggleVoice({ category, description: description.trim(), landmark: landmark.trim() });
+      // Otherwise ask the three call-taker questions by typing; works offline too. Location is already attached.
+      else if (source === 'sos' && activeReport.current) { setIntake({ id: activeReport.current, step: 0 }); setIntakeNote(''); }
     }
     catch { setMessage('Could not save this report. Please try again.'); }
     finally { if (mounted.current) setBusy(false); }
@@ -329,6 +360,31 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
             <span className="request-status-symbol">{dispatch && dispatch.stage !== 'resolved' ? <Truck size={28} /> : acknowledged ? <CheckCheck size={28} /> : delivered ? <Check size={28} /> : <Clock3 size={28} />}</span>
             <h1>{requestTitle}</h1><p className="request-explanation" role="status">{requestExplanation}</p>
             <div className="request-reference"><span>{currentReport.category} · #{currentReport.id.slice(0, 8).toUpperCase()}</span><time>{time(currentReport.createdAt)}</time></div>
+            {intake && intake.id === currentReport.id && intake.step < 3 && voiceState === 'idle' && <section ref={intakeCard} className="quick-intake" aria-label="Quick questions" key={intake.step}>
+              <div className="quick-intake-head">
+                <span className="quick-intake-step">Question {intake.step + 1} of 3</span>
+                <span className="quick-intake-location"><MapPin size={13} />{currentReport.location ? 'Location attached' : 'No GPS yet'}</span>
+              </div>
+              {intake.step === 0 && <>
+                <h2>What happened?</h2>
+                <div className="quick-intake-types">{categories.map(item => { const Icon = icons[item]; return <Button key={item} type="button" variant="outline" aria-pressed={category === item} className={category === item ? 'is-selected' : ''} onClick={() => setCategory(item)}><Icon size={18} />{item}</Button>; })}</div>
+                <Input aria-label="Describe what happened (optional)" value={intakeNote} maxLength={300} onChange={e => setIntakeNote(e.target.value)} placeholder="Short note, e.g. water rising fast" onKeyDown={e => { if (e.key === 'Enter') void answerIntake({}, 1); }} />
+                <Button className="quick-intake-next" onClick={() => void answerIntake({}, 1)}>Next<ArrowRight size={17} /></Button>
+              </>}
+              {intake.step === 1 && <>
+                <h2>How many people need help?</h2>
+                <div className="quick-intake-people">{PEOPLE_OPTIONS.map(option => <Button key={option} type="button" variant="outline" onClick={() => void answerIntake({ people: option }, 2)}>{option}</Button>)}</div>
+              </>}
+              {intake.step === 2 && <>
+                <h2>Nearest landmark?</h2>
+                <Input aria-label="Nearest landmark" autoFocus value={landmark} maxLength={240} onChange={e => setLandmark(e.target.value)} placeholder="Church, school, store, street…" onKeyDown={e => { if (e.key === 'Enter') void answerIntake({}, 3); }} />
+                <div className="quick-intake-actions">
+                  <Button variant="ghost" onClick={() => void answerIntake({ landmark: '' }, 3)}>Skip</Button>
+                  <Button className="quick-intake-next" onClick={() => void answerIntake({}, 3)}>Send details<ArrowRight size={17} /></Button>
+                </div>
+              </>}
+              {connected && <Button variant="ghost" className="quick-intake-voice" onClick={() => { setIntake(null); void toggleVoice({ category, description, landmark }); }}><Mic size={16} />Talk instead</Button>}
+            </section>}
             <ol className="request-progress" aria-label="Request progress">{[
               { name: 'Saved on phone', done: true, detail: time(currentReport.createdAt) },
               { name: 'Delivered to desk', done: Boolean(delivered), detail: currentReport.receivedAt ? time(currentReport.receivedAt) : 'Waiting for connection' },
