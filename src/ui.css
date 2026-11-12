@@ -1,0 +1,30 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted-ui);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+:root {
+  --background: #fff; --foreground: #202925;
+  --primary: #243e36; --primary-foreground: #fff;
+  --secondary: #f2f4f0; --secondary-foreground: #243e36;
+  --muted-ui: #f2f4f0; --muted-foreground: #66716b;
+  --accent: #edf1eb; --accent-foreground: #243e36;
+  --destructive: #bd3d34; --border: #e5e9e3; --input: #dce2d9; --ring: #5a7b65; --radius: .75rem;
+}
