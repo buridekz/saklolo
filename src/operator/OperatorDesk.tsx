@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { api, categories, type Category, type Report } from '../data';
 import IncidentMap from './IncidentMap';
-import { useCountUp, useNow } from './hooks';
+import { useCountUp, useMediaQuery, useNow } from './hooks';
 import {
   CATEGORY_ICONS, STALE_LOCATION_MS, age, ageLabel, clockTime, fullTime, isOpen, locationLine, prefersReducedMotion,
   shortId, sourceLabel,
@@ -37,7 +37,11 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
   const appliedSeq = useRef(0);
   const toastSeq = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
-  const detailRef = useRef<HTMLDivElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+  const lastShown = useRef<Report | undefined>(undefined);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const wide = useMediaQuery('(min-width: 900px)');
 
   const pushToast = useCallback((toast: Omit<Toast, 'id'>) => {
     const id = ++toastSeq.current;
@@ -56,7 +60,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
   }, []);
 
   const reveal = useCallback((id: string) => {
-    setQuery(''); setStatus('all'); setCategory('all'); setSelected(id);
+    setQuery(''); setStatus('all'); setCategory('all'); setSelected(id); setDrawerOpen(true);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -117,14 +121,17 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
       .sort((a, b) => Number(!isOpen(a)) - Number(!isOpen(b)) || Date.parse(b.createdAt) - Date.parse(a.createdAt));
   }, [reports, status, category, query]);
 
-  const incident = visible.find(report => report.id === selected) || visible[0];
-  const nextOpen = incident ? visible.find(report => isOpen(report) && report.id !== incident.id) : undefined;
+  // The drawer shows exactly the chosen report; arrivals and re-sorts never swap it.
+  const incident = drawerOpen ? visible.find(report => report.id === selected) : undefined;
+  if (incident) lastShown.current = incident;
+  const drawerReport = incident ?? lastShown.current; // Keeps content in place while the drawer slides out.
+  const insetRight = incident && wide ? drawerRef.current?.offsetWidth ?? 420 : 0;
+  const nextOpen = visible.find(report => isOpen(report) && report.id !== incident?.id);
   const filtered = query.trim() !== '' || status !== 'all' || category !== 'all';
 
-  // Pin whatever is on screen, so a new arrival or a re-sort never swaps the report being read.
   useEffect(() => {
-    if (incident && !reports.some(report => report.id === selected)) setSelected(incident.id);
-  }, [incident, reports, selected]);
+    if (drawerOpen && !incident) setDrawerOpen(false); // Chosen report was filtered out.
+  }, [drawerOpen, incident]);
 
   useEffect(() => {
     const previous = document.title;
@@ -142,13 +149,15 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
         return;
       }
       if (event.key === '/') { event.preventDefault(); searchRef.current?.focus(); return; }
+      if (event.key === 'Escape' && drawerOpen) { closeDrawer(); return; }
       const inQueue = Boolean(target?.closest('.ops-queue'));
       const step = event.key === 'j' || (inQueue && event.key === 'ArrowDown') ? 1 : event.key === 'k' || (inQueue && event.key === 'ArrowUp') ? -1 : 0;
       if (!step || !visible.length) return;
       event.preventDefault();
-      const index = Math.max(0, visible.findIndex(report => report.id === incident?.id));
-      const next = visible[Math.min(visible.length - 1, Math.max(0, index + step))];
+      const index = visible.findIndex(report => report.id === (incident?.id ?? selected));
+      const next = index < 0 ? visible[0] : visible[Math.min(visible.length - 1, Math.max(0, index + step))];
       setSelected(next.id);
+      setDrawerOpen(true);
       const rowFocused = Boolean(target?.closest('.ops-report'));
       requestAnimationFrame(() => {
         const row = document.querySelector<HTMLElement>(`[data-report-id="${next.id}"]`);
@@ -158,15 +167,20 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [visible, incident?.id]);
+  }, [visible, incident?.id, selected, drawerOpen]);
 
-  const selectFromMap = useCallback((id: string) => setSelected(id), []);
-
-  function chooseFromQueue(id: string) {
-    setSelected(id);
-    if (window.matchMedia('(max-width: 760px)').matches) {
-      requestAnimationFrame(() => detailRef.current?.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' }));
+  const choose = useCallback((id: string) => { setSelected(id); setDrawerOpen(true); }, []);
+  const closeDrawer = useCallback(() => {
+    // If focus was inside the drawer, hand it back to the report's queue row instead of losing it.
+    const focusInside = drawerRef.current?.contains(document.activeElement);
+    setDrawerOpen(false);
+    if (focusInside && selected) {
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-report-id="${selected}"]`)?.focus({ preventScroll: true }));
     }
+  }, [selected]);
+
+  function filterBy(next: StatusFilter) {
+    setStatus(current => current === next ? 'all' : next);
   }
 
   function manualRefresh() {
@@ -230,12 +244,15 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
 
         <section className="ops-stats" aria-label="Desk summary">
           <Stat tone="alert" icon={<Clock3 size={16} />} label="Awaiting review" value={open.length}
+            pressed={status === 'review'} onPress={() => filterBy('review')}
             sub={oldestOpen ? <>Oldest waiting <strong>{age(oldestOpen.createdAt, now)}</strong></> : loaded ? 'Queue clear' : '—'} />
           <Stat tone="ok" icon={<CheckCheck size={16} />} label="Acknowledged" value={reports.length - open.length}
+            pressed={status === 'acknowledged'} onPress={() => filterBy('acknowledged')}
             sub={reports.length ? `${Math.round(((reports.length - open.length) / reports.length) * 100)}% of received` : 'None yet'} />
           <Stat icon={<MapPin size={16} />} label="With location" value={located}
             sub={reports.length - located ? `${reports.length - located} need a landmark` : reports.length ? 'All reports mapped' : 'None yet'} />
           <Stat icon={<Inbox size={16} />} label="Received" value={reports.length}
+            pressed={!filtered && reports.length > 0} onPress={clearFilters}
             sub={reports.length ? `Latest ${ageLabel(reports.reduce((a, b) => Date.parse(a.createdAt) > Date.parse(b.createdAt) ? a : b).createdAt, now)}` : 'Waiting for residents'} />
         </section>
 
@@ -302,7 +319,11 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                             data-report-id={report.id}
                             className={['ops-report', active && 'is-selected', isOpen(report) ? 'is-open' : 'is-ack', fresh.has(report.id) && 'is-fresh'].filter(Boolean).join(' ')}
                             aria-pressed={active}
-                            onClick={() => chooseFromQueue(report.id)}
+                            onClick={() => choose(report.id)}
+                            onMouseEnter={() => setHovered(report.id)}
+                            onMouseLeave={() => setHovered(current => current === report.id ? null : current)}
+                            onFocus={() => setHovered(report.id)}
+                            onBlur={() => setHovered(current => current === report.id ? null : current)}
                           >
                             <span className="ops-report-icon"><Icon size={16} /></span>
                             <span className="ops-report-body">
@@ -332,30 +353,38 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
           </aside>
 
           <section className="ops-map-pane" aria-label="Incident map">
-            <IncidentMap reports={visible} selected={incident?.id || null} fresh={fresh} onSelect={selectFromMap} />
-          </section>
-
-          <div className="ops-detail-pane" ref={detailRef}>
-            {incident ? (
-              <IncidentDetail
-                key={incident.id}
-                report={incident}
-                now={now}
-                busy={busyId === incident.id}
-                updated={fresh.has(incident.id)}
-                nextOpen={nextOpen}
-                onAcknowledge={() => void acknowledge(incident)}
-                onNext={() => nextOpen && setSelected(nextOpen.id)}
-                onCopyFailed={() => pushToast({ tone: 'error', title: 'Copy unavailable', body: 'This browser blocked clipboard access.' })}
-              />
-            ) : (
-              <div className="ops-no-selection">
-                <span className="ops-empty-icon"><Radio size={20} /></span>
-                <h2>{reports.length ? 'Nothing selected' : 'Waiting for the first report'}</h2>
-                <p>{reports.length ? 'Choose a report from the queue to review it.' : 'Details and review controls appear here once a resident report is delivered.'}</p>
+            <IncidentMap reports={visible} selected={incident?.id || null} hovered={hovered} fresh={fresh} insetRight={insetRight} now={now} onSelect={choose} />
+            {loaded && !visible.length && (
+              <div className="ops-map-empty">
+                <Radio size={18} />
+                <span>{reports.length ? 'No reports match the current filters.' : 'Waiting for the first resident report.'}</span>
               </div>
             )}
-          </div>
+            <div className={`ops-sheet-backdrop ${incident ? 'is-open' : ''}`} onClick={closeDrawer} aria-hidden />
+            <div
+              ref={drawerRef}
+              className={`ops-drawer ${incident ? 'is-open' : ''}`}
+              inert={!incident}
+              aria-hidden={!incident}
+              role="region"
+              aria-label="Selected incident"
+            >
+              {drawerReport && (
+                <IncidentDetail
+                  key={drawerReport.id}
+                  report={drawerReport}
+                  now={now}
+                  busy={busyId === drawerReport.id}
+                  updated={fresh.has(drawerReport.id)}
+                  nextOpen={nextOpen}
+                  onAcknowledge={() => void acknowledge(drawerReport)}
+                  onNext={() => nextOpen && choose(nextOpen.id)}
+                  onClose={closeDrawer}
+                  onCopyFailed={() => pushToast({ tone: 'error', title: 'Copy unavailable', body: 'This browser blocked clipboard access.' })}
+                />
+              )}
+            </div>
+          </section>
         </div>
       </main>
 
@@ -371,15 +400,22 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
   );
 }
 
-function Stat({ label, value, sub, icon, tone }: { label: string; value: number; sub: ReactNode; icon: ReactNode; tone?: 'alert' | 'ok' }) {
+type StatProps = { label: string; value: number; sub: ReactNode; icon: ReactNode; tone?: 'alert' | 'ok'; pressed?: boolean; onPress?: () => void };
+
+/** Summary card; cards with onPress double as one-click queue filters. */
+function Stat({ label, value, sub, icon, tone, pressed, onPress }: StatProps) {
   const display = useCountUp(value);
-  return (
-    <div className={`ops-stat ${tone ? `is-${tone}` : ''}`}>
+  const className = ['ops-stat', tone && `is-${tone}`, onPress && 'is-action'].filter(Boolean).join(' ');
+  const content = (
+    <>
       <span className="ops-stat-label">{icon}{label}</span>
       <strong className="ops-stat-value">{display}</strong>
       <span className="ops-stat-sub">{sub}</span>
-    </div>
+    </>
   );
+  return onPress
+    ? <button type="button" className={className} aria-pressed={Boolean(pressed)} onClick={onPress} title={`Show ${label.toLowerCase()} in the queue`}>{content}</button>
+    : <div className={className}>{content}</div>;
 }
 
 function StatusPill({ report, large }: { report: Report; large?: boolean }) {
@@ -401,9 +437,10 @@ type DetailProps = {
   onAcknowledge: () => void;
   onNext: () => void;
   onCopyFailed: () => void;
+  onClose: () => void;
 };
 
-function IncidentDetail({ report, now, busy, updated, nextOpen, onAcknowledge, onNext, onCopyFailed }: DetailProps) {
+function IncidentDetail({ report, now, busy, updated, nextOpen, onAcknowledge, onNext, onCopyFailed, onClose }: DetailProps) {
   const [copied, setCopied] = useState(false);
   const Icon = CATEGORY_ICONS[report.category] || CATEGORY_ICONS.Other;
   const open = isOpen(report);
@@ -430,15 +467,22 @@ function IncidentDetail({ report, now, busy, updated, nextOpen, onAcknowledge, o
   ];
 
   return (
-    <article className={`ops-detail ${updated ? 'is-updated' : ''}`} aria-label="Selected incident">
+    <article className={`ops-detail ${updated ? 'is-updated' : ''}`}>
+      <div className="ops-drawer-bar">
+        <span className="ops-sheet-handle" aria-hidden />
+        <StatusPill report={report} large />
+        <span className="ops-drawer-id">#{shortId(report)}</span>
+        <button type="button" className="ops-icon-button ops-drawer-close" onClick={onClose} aria-label="Close report details" title="Close (Esc)">
+          <X size={16} />
+        </button>
+      </div>
       <div className="ops-detail-scroll">
         <header className="ops-detail-head">
           <span className={`ops-detail-icon ${open ? 'is-open' : 'is-ack'}`}><Icon size={20} /></span>
           <div className="ops-detail-title">
             <h2>{report.category} assistance</h2>
-            <p>#{shortId(report)} · {report.source === 'voice' ? 'Voice-assisted report' : 'Resident report'}{(report.revision || 1) > 1 ? ` · revision ${report.revision}` : ''}</p>
+            <p>{report.source === 'voice' ? 'Voice-assisted report' : 'Resident report'} · received {report.receivedAt ? ageLabel(report.receivedAt, now) : 'pending'}{(report.revision || 1) > 1 ? ` · revision ${report.revision}` : ''}</p>
           </div>
-          <StatusPill report={report} large />
         </header>
 
         {open && (
