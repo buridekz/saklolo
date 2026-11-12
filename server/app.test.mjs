@@ -182,3 +182,35 @@ test('operator verification is recorded with a history and never changes review 
     assert.equal(notifications, 5);
   });
 });
+
+test('simulated dispatch requires review, only moves forward, and is always marked as a simulation', async () => {
+  await runServer({}, async base => {
+    const send = (url, method, data) => fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const report = { id: randomUUID(), createdAt: new Date().toISOString(), category: 'Fire', description: 'Test smoke', landmark: 'Test hall', location: null, source: 'sos' };
+    const route = `/api/reports/${report.id}/dispatch`;
+    assert.equal((await send(route, 'POST', { agency: 'BFP', stage: 'notified' })).status, 404);
+    await send('/api/reports', 'POST', { ...report, dispatch: { agency: 'BFP', stage: 'resolved' } });
+    assert.equal((await (await fetch(base + '/api/reports')).json())[0].dispatch, undefined, 'residents cannot create a dispatch');
+    assert.equal((await send(route, 'POST', { agency: 'BFP', stage: 'notified' })).status, 409, 'dispatch needs operator review first');
+
+    await send(`/api/reports/${report.id}/acknowledge`, 'POST', {});
+    assert.equal((await send(route, 'POST', { agency: 'NASA', stage: 'notified' })).status, 400);
+    assert.equal((await send(route, 'POST', { agency: 'BFP', stage: 'teleported' })).status, 400);
+    const notified = await (await send(route, 'POST', { agency: 'BFP', stage: 'notified' })).json();
+    assert.equal(notified.dispatch.agency, 'BFP');
+    assert.equal(notified.dispatch.stage, 'notified');
+    assert.equal(notified.dispatch.simulated, true);
+    assert.ok(notified.dispatch.updatedAt);
+    assert.equal(notified.status, 'acknowledged');
+
+    const enRoute = await (await send(route, 'POST', { stage: 'en_route' })).json();
+    assert.equal(enRoute.dispatch.agency, 'BFP', 'later stages keep the assigned agency');
+    assert.equal((await send(route, 'POST', { stage: 'notified' })).status, 409, 'stages never move backwards');
+    const resolved = await (await send(route, 'POST', { stage: 'resolved' })).json();
+    assert.deepEqual(resolved.dispatchHistory.map(entry => entry.stage), ['notified', 'en_route', 'resolved']);
+
+    assert.equal((await send(`/api/reports/${report.id}`, 'PATCH', { revision: 2, dispatch: { stage: 'notified' } })).status, 400);
+    const edited = await (await send(`/api/reports/${report.id}`, 'PATCH', { revision: 2, description: 'Test smoke, fire out' })).json();
+    assert.equal(edited.dispatch.stage, 'resolved', 'resident edits keep the dispatch record');
+  });
+});

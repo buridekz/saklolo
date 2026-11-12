@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
-import { ArrowRight, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Volume2, VolumeX, Waves, WifiOff } from 'lucide-react';
+import { ArrowRight, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Truck, Volume2, VolumeX, Waves, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { categories, db, editReport, labels, syncReports, type Category, type Report } from './data';
+import { agencyNames, categories, db, dispatchStages, editReport, labels, stageLabels, syncReports, type Category, type Report } from './data';
 import { useDeviceLocation } from './useDeviceLocation';
 import type { VoiceReportState, VoiceStatus, VoiceTranscript } from './voice';
 import './resident.css';
@@ -257,8 +257,18 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
 
   const delivered = currentReport && currentReport.status !== 'pending';
   const acknowledged = currentReport?.status === 'acknowledged';
-  const requestTitle = acknowledged ? 'Your request was reviewed' : delivered ? 'Request delivered' : 'Saved on this phone';
-  const requestExplanation = acknowledged ? 'The demo desk acknowledged your request. No responder has been dispatched.' : delivered ? 'Waiting for an operator to review your request.' : 'Not delivered yet. Keep the app open; we’ll retry when the desk is reachable.';
+  // DEMO ONLY: the desk can simulate a dispatch; every message says so.
+  const dispatch = currentReport?.dispatch || null;
+  const dispatchStep = dispatch ? dispatchStages.indexOf(dispatch.stage) : -1;
+  const stageTime = (stage: (typeof dispatchStages)[number]) => {
+    const entry = currentReport?.dispatchHistory?.find(item => item.stage === stage);
+    return entry ? time(entry.updatedAt) : null;
+  };
+  const dispatchTitle = dispatch ? { notified: `${dispatch.agency} notified`, en_route: 'Help is on the way', on_scene: 'Responders are on scene', resolved: 'Request resolved' }[dispatch.stage] : null;
+  const requestTitle = dispatchTitle || (acknowledged ? 'Your request was reviewed' : delivered ? 'Request delivered' : 'Saved on this phone');
+  const requestExplanation = dispatch
+    ? `Simulation: the demo desk marked ${agencyNames[dispatch.agency]} as “${stageLabels[dispatch.stage].toLowerCase()}”. No real agency was contacted.`
+    : acknowledged ? 'The demo desk acknowledged your request. No responder has been dispatched.' : delivered ? 'Waiting for an operator to review your request.' : 'Not delivered yet. Keep the app open; we’ll retry when the desk is reachable.';
   const voiceLabel = muted ? 'Microphone muted' : voiceStatus === 'speaking' ? 'Assistant speaking' : voiceStatus === 'saving' ? 'Saving your report' : voiceState === 'connecting' ? 'Connecting voice…' : 'Listening to you';
   const conversation = transcript.length > 0 && <section className="voice-transcript" aria-label="Voice conversation"><h2>Live captions</h2><div role="log" aria-live="polite" aria-relevant="additions text">{transcript.slice(-6).map(line => <p key={line.id} className={line.role}><strong>{line.role === 'user' ? 'You' : 'Saklolo'}</strong>{line.text}</p>)}</div></section>;
 
@@ -281,13 +291,16 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
             {currentReport && <div className="companion-request-summary"><div><h3>Your request</h3><Button variant="ghost" onClick={openDetails}>Edit details</Button></div><p>{currentReport.description || 'Your request is saved. You can add details by speaking.'}</p><small>{currentReport.category} assistance{currentReport.landmark ? ` · ${currentReport.landmark}` : ''}</small><p className="companion-saved-status"><CheckCheck size={15} />{currentReport.needsSync ? 'Updated details waiting for delivery' : labels[currentReport.status]}</p></div>}
           </section>}
           {currentReport ? <section className={`active-request ${delivered ? 'is-delivered' : 'is-pending'}`} aria-label="Active request" data-arrive>
-            <span className="request-status-symbol">{acknowledged ? <CheckCheck size={28} /> : delivered ? <Check size={28} /> : <Clock3 size={28} />}</span>
+            <span className="request-status-symbol">{dispatch && dispatch.stage !== 'resolved' ? <Truck size={28} /> : acknowledged ? <CheckCheck size={28} /> : delivered ? <Check size={28} /> : <Clock3 size={28} />}</span>
             <h1>{requestTitle}</h1><p className="request-explanation" role="status">{requestExplanation}</p>
             <div className="request-reference"><span>{currentReport.category} · #{currentReport.id.slice(0, 8).toUpperCase()}</span><time>{time(currentReport.createdAt)}</time></div>
             <ol className="request-progress" aria-label="Request progress">{[
               { name: 'Saved on phone', done: true, detail: time(currentReport.createdAt) },
               { name: 'Delivered to desk', done: Boolean(delivered), detail: currentReport.receivedAt ? time(currentReport.receivedAt) : 'Waiting for connection' },
-              { name: 'Acknowledged', done: acknowledged, detail: currentReport.acknowledgedAt ? time(currentReport.acknowledgedAt) : 'Waiting for operator' }
+              { name: 'Acknowledged', done: acknowledged, detail: currentReport.acknowledgedAt ? time(currentReport.acknowledgedAt) : 'Waiting for operator' },
+              { name: 'Agency notified (simulated)', done: dispatchStep >= 0, detail: dispatch ? `${agencyNames[dispatch.agency]} · ${stageTime('notified') || ''}` : 'After review' },
+              { name: dispatchStep >= 2 ? 'Responders on scene' : 'Responders on the way', done: dispatchStep >= 1, detail: (dispatchStep >= 2 ? stageTime('on_scene') : stageTime('en_route')) || 'Not yet' },
+              { name: 'Resolved', done: dispatchStep >= 3, detail: stageTime('resolved') || 'Not yet' }
             ].map(step => <li key={step.name} className={step.done ? 'is-complete' : ''}><span>{step.done ? <Check size={14} /> : <span />}</span><div><strong>{step.name}</strong><small>{step.detail}</small></div></li>)}</ol>
             {currentReport.needsSync && <p className="request-update-pending">New details saved on this phone. Waiting to deliver the update.</p>}
             <div className="request-location-note"><MapPin size={16} /><span>{currentReport.location ? 'Location included' : currentReport.landmark ? `Landmark: ${currentReport.landmark}` : 'Location missing — add a landmark below'}</span></div>

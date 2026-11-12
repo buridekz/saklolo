@@ -4,7 +4,7 @@ import {
   ArrowRight, BadgeCheck, Check, CheckCheck, CircleDashed, Flag, MapPinCheck, Phone, RotateCcw, Users, Clock3, Copy, ExternalLink, Inbox, LayoutDashboard, LoaderCircle,
   MapPin, Mic, Plus, Radio, RefreshCw, Search, ShieldCheck, Smartphone, Timer, Truck, Wifi, WifiOff, X,
 } from 'lucide-react';
-import { api, categories, type Category, type Report } from '../data';
+import { agencyNames, api, categories, dispatchStages, stageLabels, type Agency, type Category, type DispatchStage, type Report } from '../data';
 import IncidentMap from './IncidentMap';
 import { useCountUp, useMediaQuery, useNow } from './hooks';
 import {
@@ -193,6 +193,19 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
     void refresh();
   }
 
+  /** DEMO ONLY: records a simulated dispatch stage. No agency is contacted. */
+  async function simulateDispatch(report: Report, stage: DispatchStage, agency?: Agency) {
+    try {
+      const saved = await api<Report>(`/api/reports/${report.id}/dispatch`, { method: 'POST', body: JSON.stringify(agency ? { agency, stage } : { stage }) });
+      setReports(list => list.map(item => item.id === saved.id ? saved : item));
+      pushToast({ tone: 'success', title: `${stageLabels[stage]} · #${shortId(report)}`, body: `Simulated for ${agencyNames[saved.dispatch!.agency]}. No real agency was contacted.` });
+      return true;
+    } catch (cause) {
+      pushToast({ tone: 'error', title: 'Dispatch not saved', body: cause instanceof Error ? cause.message : 'Try again.' });
+      return false;
+    }
+  }
+
   async function verify(report: Report, status: VerificationStatus, note: string) {
     try {
       const saved = await api<Report>(`/api/reports/${report.id}/verification`, { method: 'POST', body: JSON.stringify({ status, note }) });
@@ -361,6 +374,11 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                                   <span className="ops-source ops-corroborated" title="Other reports within 300 m and an hour">+{nearbyCounts.get(report.id)} nearby</span>
                                 )}
                                 {verificationOf(report)?.status === 'flagged' && <span className="ops-source ops-flagged"><Flag size={11} />Flagged</span>}
+                                {report.dispatch && (
+                                  <span className={`ops-source ops-dispatch is-${report.dispatch.stage}`} title="Simulated dispatch, no agency contacted">
+                                    <Truck size={12} />{report.dispatch.agency} · {stageLabels[report.dispatch.stage].replace('Responders ', '').replace('Agency ', '')}
+                                  </span>
+                                )}
                                 {['confirmed', 'corroborated', 'field_checked'].includes(verificationOf(report)?.status || '') && (
                                   <span className="ops-source ops-corroborated" title={VERIFICATION_LABELS[verificationOf(report)!.status]}><BadgeCheck size={12} />Verified</span>
                                 )}
@@ -408,6 +426,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                   nextOpen={nextOpen}
                   onAcknowledge={() => void acknowledge(drawerReport)}
                   onVerify={(status, note) => verify(drawerReport, status, note)}
+                  onDispatch={(stage, agency) => simulateDispatch(drawerReport, stage, agency)}
                   onNext={() => nextOpen && choose(nextOpen.id)}
                   onClose={closeDrawer}
                   onCopyFailed={() => pushToast({ tone: 'error', title: 'Copy unavailable', body: 'This browser blocked clipboard access.' })}
@@ -470,7 +489,74 @@ type DetailProps = {
   onClose: () => void;
   nearby: number;
   onVerify: (status: VerificationStatus, note: string) => Promise<boolean>;
+  onDispatch: (stage: DispatchStage, agency?: Agency) => Promise<boolean>;
 };
+
+const SUGGESTED_AGENCY: Record<Category, Agency> = { Fire: 'BFP', Medical: 'EMS', Flood: 'MDRRMO', Safety: 'PNP', Other: 'Barangay' };
+const NEXT_STAGE_ACTION: Record<DispatchStage, string> = { notified: 'Mark on the way', en_route: 'Mark on scene', on_scene: 'Mark resolved', resolved: '' };
+
+/** DEMO ONLY: simulated hand-off to a responding agency, after operator review. */
+function DispatchPanel({ report, now, onDispatch }: { report: Report; now: number; onDispatch: DetailProps['onDispatch'] }) {
+  const [agency, setAgency] = useState<Agency>(report.dispatch?.agency || SUGGESTED_AGENCY[report.category] || 'Barangay');
+  const [saving, setSaving] = useState(false);
+  const dispatch = report.dispatch;
+  const reviewed = !isOpen(report);
+  const step = dispatch ? dispatchStages.indexOf(dispatch.stage) : -1;
+  const next = dispatchStages[step + 1];
+
+  async function run(stage: DispatchStage) {
+    setSaving(true);
+    await onDispatch(stage, dispatch ? undefined : agency);
+    setSaving(false);
+  }
+
+  return (
+    <section className="ops-block ops-dispatch-panel" aria-labelledby="ops-dispatch-title">
+      <div className="ops-block-head">
+        <h3 id="ops-dispatch-title">Dispatch</h3>
+        <span className="ops-sim-badge">Simulation</span>
+      </div>
+      {!reviewed ? (
+        <p className="ops-dispatch-hint">Acknowledge the report first. Dispatch is only simulated after a human has reviewed it.</p>
+      ) : !dispatch ? (
+        <>
+          <div className="ops-agency-grid" role="radiogroup" aria-label="Agency to notify">
+            {(Object.keys(agencyNames) as Agency[]).map(code => (
+              <button key={code} type="button" role="radio" aria-checked={agency === code} onClick={() => setAgency(code)}>
+                <strong>{code}</strong><small>{agencyNames[code].replace(/ \(.*\)$/, '')}</small>
+                {SUGGESTED_AGENCY[report.category] === code && <em>Suggested</em>}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="ops-button ops-acknowledge ops-dispatch-go" disabled={saving} onClick={() => void run('notified')}>
+            {saving ? <><LoaderCircle size={16} className="ops-spinner" /> Calling…</> : <><Phone size={16} /> Simulate call to {agency}</>}
+          </button>
+        </>
+      ) : (
+        <>
+          <ol className="ops-dispatch-steps">
+            {dispatchStages.map((stage, index) => {
+              const entry = report.dispatchHistory?.find(item => item.stage === stage);
+              return (
+                <li key={stage} className={index <= step ? 'is-done' : index === step + 1 ? 'is-next' : ''}>
+                  <span aria-hidden>{index <= step ? <Check size={11} strokeWidth={3} /> : null}</span>
+                  <strong>{stageLabels[stage]}</strong>
+                  <small>{entry ? ageLabel(entry.updatedAt, now) : '—'}</small>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="ops-dispatch-hint"><Truck size={14} /> {agencyNames[dispatch.agency]} · simulated, no agency was contacted.</p>
+          {next && (
+            <button type="button" className="ops-button ops-button-quiet ops-dispatch-go" disabled={saving} onClick={() => void run(next)}>
+              {saving ? <><LoaderCircle size={16} className="ops-spinner" /> Saving…</> : <>{NEXT_STAGE_ACTION[dispatch.stage]} <ArrowRight size={15} /></>}
+            </button>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
 
 const VERIFY_OPTIONS: { status: VerificationStatus; label: string; Icon: typeof Phone }[] = [
   { status: 'confirmed', label: 'Confirmed with resident', Icon: Phone },
@@ -542,7 +628,7 @@ function VerificationPanel({ report, now, onVerify }: { report: Report; now: num
   );
 }
 
-function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknowledge, onNext, onCopyFailed, onClose, onVerify }: DetailProps) {
+function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknowledge, onNext, onCopyFailed, onClose, onVerify, onDispatch }: DetailProps) {
   const signals = trustSignals(report, nearby, now);
   const strong = signals.filter(signal => signal.state === 'strong').length;
   const [copied, setCopied] = useState(false);
@@ -568,7 +654,9 @@ function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknow
     { label: 'Recorded on resident device', at: report.createdAt, done: true },
     { label: 'Delivered to response desk', at: report.receivedAt, done: Boolean(report.receivedAt) },
     { label: 'Reviewed and acknowledged', at: report.acknowledgedAt, done: !open },
-    { label: 'Responder dispatch', done: false, note: 'Not connected in this prototype', muted: true },
+    report.dispatch
+      ? { label: `${stageLabels[report.dispatch.stage]} (simulated)`, at: report.dispatch.updatedAt, done: true }
+      : { label: 'Responder dispatch', done: false, note: 'Simulated only, after review', muted: true },
   ];
 
   return (
@@ -671,6 +759,8 @@ function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknow
           </ul>
           <p className="ops-signals-note">Signals help you judge a report. None of them proves it real or fake, so never hold back help while waiting for them.</p>
         </section>
+
+        <DispatchPanel report={report} now={now} onDispatch={onDispatch} />
 
         <VerificationPanel report={report} now={now} onVerify={onVerify} />
 

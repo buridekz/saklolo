@@ -2,7 +2,14 @@ import Dexie, { type Table } from 'dexie';
 export const categories = ['Medical', 'Fire', 'Safety', 'Flood', 'Other'] as const;
 export type Category = typeof categories[number];
 export type Coordinates = { lat: number; lng: number; accuracy: number | null };
-export type Report = { id: string; createdAt: string; category: Category; description: string; landmark: string; location: Coordinates | null; locationCapturedAt?: string | null; revision?: number; needsSync?: boolean; source: 'sos' | 'form' | 'voice'; status: 'pending' | 'delivered' | 'acknowledged'; receivedAt?: string; acknowledgedAt?: string | null; deliveryError?: string };
+export type Report = { id: string; createdAt: string; category: Category; description: string; landmark: string; location: Coordinates | null; locationCapturedAt?: string | null; revision?: number; needsSync?: boolean; source: 'sos' | 'form' | 'voice'; status: 'pending' | 'delivered' | 'acknowledged'; receivedAt?: string; acknowledgedAt?: string | null; deliveryError?: string; dispatch?: Dispatch | null; dispatchHistory?: Dispatch[] };
+/** DEMO ONLY: simulated responder dispatch set by the operator desk. No agency is ever contacted. */
+export const dispatchStages = ['notified', 'en_route', 'on_scene', 'resolved'] as const;
+export type DispatchStage = typeof dispatchStages[number];
+export type Agency = 'BFP' | 'EMS' | 'MDRRMO' | 'PNP' | 'Barangay';
+export type Dispatch = { agency: Agency; stage: DispatchStage; simulated: true; updatedAt: string };
+export const agencyNames: Record<Agency, string> = { BFP: 'Fire protection (BFP)', EMS: 'Ambulance / EMS', MDRRMO: 'Disaster response (MDRRMO)', PNP: 'Police (PNP)', Barangay: 'Barangay responders' };
+export const stageLabels: Record<DispatchStage, string> = { notified: 'Agency notified', en_route: 'Responders on the way', on_scene: 'Responders on scene', resolved: 'Resolved' };
 class LocalDatabase extends Dexie {
   reports!: Table<Report>;
   constructor() { super('saklolo'); this.version(1).stores({ reports: 'id,status,createdAt' }); }

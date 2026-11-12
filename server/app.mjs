@@ -96,6 +96,28 @@ export function createApp({ database = ':memory:', apiKey = '', model = 'gpt-rea
     report.verificationHistory = [...(report.verificationHistory || []), entry].slice(-20);
     save(report); notify(); res.json(report);
   });
+  // DEMO ONLY: simulated responder dispatch. No agency is contacted; every record carries
+  // simulated: true so neither screen can present it as a real dispatch.
+  const dispatchStages = ['notified', 'en_route', 'on_scene', 'resolved'];
+  const dispatchSchema = z.object({
+    agency: z.enum(['BFP', 'EMS', 'MDRRMO', 'PNP', 'Barangay']).optional(),
+    stage: z.enum(dispatchStages),
+  }).strict();
+  app.post('/api/reports/:id/dispatch', (req, res) => {
+    const report = get(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Report not found.' });
+    const parsed = dispatchSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid dispatch. Choose a listed agency and stage.' });
+    if (report.status !== 'acknowledged') return res.status(409).json({ error: 'Acknowledge the report before simulating a dispatch.' });
+    const agency = parsed.data.agency || report.dispatch?.agency;
+    if (!agency) return res.status(400).json({ error: 'Choose an agency to notify.' });
+    const current = report.dispatch ? dispatchStages.indexOf(report.dispatch.stage) : -1;
+    if (dispatchStages.indexOf(parsed.data.stage) <= current) return res.status(409).json({ error: 'Dispatch stages only move forward.' });
+    const entry = { agency, stage: parsed.data.stage, simulated: true, updatedAt: new Date().toISOString() };
+    report.dispatch = entry;
+    report.dispatchHistory = [...(report.dispatchHistory || []), entry].slice(-20);
+    save(report); notify(); res.json(report);
+  });
   app.post('/api/voice/session', rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'voice_session_limit', error: 'Too many voice sessions. Wait a minute, or use the SOS button.' } }), async (_req, res) => {
     if (!apiKey) return res.status(503).json({ code: 'voice_not_configured', error: 'Voice is not configured. You can still send an SOS.' });
     const controller = new AbortController();

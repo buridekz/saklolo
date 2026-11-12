@@ -69,6 +69,19 @@ try {
   const verified = (await (await fetch(`${base}/api/reports`)).json()).find(report => report.id === id);
   check('verification is recorded and shown in the queue', verified?.verification?.status === 'confirmed' && verified.status === 'acknowledged');
 
+  // Simulated dispatch: notify the suggested agency, then advance to resolved.
+  const drawer = operatorPage.locator('.ops-drawer');
+  await drawer.getByRole('button', { name: /Simulate call to/ }).click();
+  await residentPage.getByText(/notified$/).first().waitFor({ timeout: 10000 });
+  check('resident sees the agency was notified (simulated)', await residentPage.getByText(/No real agency was contacted/).first().isVisible());
+  for (const action of ['Mark on the way', 'Mark on scene', 'Mark resolved']) {
+    await drawer.getByRole('button', { name: action }).click();
+    await drawer.getByRole('button', { name: action }).waitFor({ state: 'detached', timeout: 10000 });
+  }
+  await residentPage.getByText('Request resolved').first().waitFor({ timeout: 10000 });
+  const done = (await (await fetch(`${base}/api/reports`)).json()).find(report => report.id === id);
+  check('dispatch reaches resolved on both screens', done?.dispatch?.stage === 'resolved' && done.dispatch.simulated === true);
+
   check('no page errors on either side', errors.length === 0, errors.slice(0, 3).join(' | '));
 } catch (error) {
   check('flow completed', false, error instanceof Error ? error.message.split('\n')[0] : String(error));
