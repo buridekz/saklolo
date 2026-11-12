@@ -325,7 +325,8 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
               { name: dispatchStep >= 2 ? 'Responders on scene' : 'Responders on the way', done: dispatchStep >= 1, detail: (dispatchStep >= 2 ? stageTime('on_scene') : stageTime('en_route')) || 'Not yet' },
               { name: 'Resolved', done: dispatchStep >= 3, detail: stageTime('resolved') || 'Not yet' }
             ].map(step => <li key={step.name} className={step.done ? 'is-complete' : ''}><span>{step.done ? <Check size={14} /> : <span />}</span><div><strong>{step.name}</strong><small>{step.detail}</small></div></li>)}</ol>
-            {currentReport.needsSync && <p className="request-update-pending">New details saved on this phone. Waiting to deliver the update.</p>}
+            {/* Only for edits to an already-delivered request; an undelivered one shows the SMS fallback instead. */}
+            {currentReport.needsSync && currentReport.status !== 'pending' && <p className="request-update-pending">New details saved on this phone. Waiting to deliver the update.</p>}
             {currentReport.status === 'pending' && <SmsFallback report={currentReport} />}
             <div className="request-location-note"><MapPin size={16} /><span>{currentReport.location ? 'Location included' : currentReport.landmark ? `Landmark: ${currentReport.landmark}` : 'Location missing — add a landmark below'}</span></div>
             <Button variant="outline" className="request-add-info" onClick={openDetails}><Plus size={18} />Add information<ArrowRight size={16} /></Button>

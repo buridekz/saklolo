@@ -87,3 +87,4 @@
 .sms-fallback > small { display: block; margin-top: 10px; font-size: 11.5px; line-height: 1.5; color: #7a6338; }
 @media (hover: hover) and (pointer: fine) { .phone-app .sms-send:hover { background: #1a2f29; } }
 @keyframes sms-arrive { from { opacity: 0; transform: translateY(6px); } }
+
