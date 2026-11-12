@@ -20,6 +20,15 @@ Never conflate pending local storage, confirmed server delivery, human acknowled
 ## Resident motion
 GSAP handles short vertical arrival transitions, optional-detail expansion, and status feedback. Reduced-motion users receive the same fully visible controls without animation. No infinite SOS pulse, artificial sending delay, or hidden initial screen. Desktop phone presentation begins at 600px; compact phones are supported down to 320px.
 
+## Resident request flow
+The help screen prioritizes one SOS action, voice as a secondary action, and a location review. Connectivity is visible above the primary action. Optional details never block local saving. The resident header contains no operator navigation.
+
+After saving, the active request replaces the SOS with a persistent status panel: saved on phone, delivered to desk, and acknowledged. Each milestone uses confirmed report state and timestamps. Additional text or voice updates the same incident; starting a separate request is explicit. The active incident survives reload and can be reopened from report history. Acknowledgement never implies dispatch.
+
+Location review opens a compact GPS map, capture time, accuracy, refresh, and landmark fallback. Voice has clear listening/speaking/connecting states, large mute/end controls, captions, and editable saved details. Offline voice is unavailable; local requests remain usable.
+
+While voice is connected, the companion sits above request progress. Live captions and the saved incident summary remain together; microphone mute and spoken status updates are separate controls. Confirmed status changes can be announced after the user, assistant playback, and tool work are idle. Status announcements never infer dispatch. The session starts with an explicit tap and ends with a visible control; there is no background wake-word listener.
+
 ## Operator map and review desk
 The desk pairs a searchable, filterable inbox with an incident map and a focused review panel. Counts come from received reports. Awaiting-review reports sort first; acknowledgement confirms human review and never implies dispatch.
 

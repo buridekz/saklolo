@@ -12,6 +12,7 @@ import {
   shortId, sourceLabel, VERIFICATION_LABELS, verificationOf, type VerificationStatus,
 } from './format';
 import { nearbyReports, trustSignals } from './signals';
+import { useLocationLabel } from '../useLocationLabel';
 import './operator.css';
 
 type StatusFilter = 'all' | 'review' | 'acknowledged';
@@ -548,6 +549,7 @@ function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknow
   const Icon = CATEGORY_ICONS[report.category] || CATEGORY_ICONS.Other;
   const open = isOpen(report);
   const location = report.location;
+  const place = useLocationLabel(location);
   const coords = location ? `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}` : null;
   const capturedAt = report.locationCapturedAt || null;
   const stale = capturedAt ? now - Date.parse(capturedAt) > STALE_LOCATION_MS : false;
@@ -630,6 +632,16 @@ function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknow
                 </div>
               )}
             </div>
+            {location && (place.label || place.state === 'loading') && (
+              <div className="ops-location-row">
+                <MapPin size={16} />
+                <div>
+                  <span>Approximate address</span>
+                  <strong>{place.label || 'Looking up place name…'}</strong>
+                  <small>Derived from the map, not from the resident · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a></small>
+                </div>
+              </div>
+            )}
             {capturedAt && (
               <div className={`ops-capture ${stale ? 'is-stale' : ''}`}>
                 <Clock3 size={13} />

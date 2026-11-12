@@ -13,8 +13,16 @@ export default function App() {
     return () => { clearInterval(timer); window.removeEventListener('online', sync); };
   }, []);
   useEffect(() => {
-    const check = async () => { try { await api('/api/health'); setConnected(true); } catch { setConnected(false); } };
-    void check(); const timer = setInterval(check, 5000); return () => clearInterval(timer);
+    let active = true;
+    const offline = () => setConnected(false);
+    const check = async () => {
+      if (!navigator.onLine) { setConnected(false); return; }
+      try { await api('/api/health'); if (active) setConnected(navigator.onLine); }
+      catch { if (active) setConnected(false); }
+    };
+    window.addEventListener('offline', offline); window.addEventListener('online', check);
+    void check(); const timer = setInterval(check, 5000);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('offline', offline); window.removeEventListener('online', check); };
   }, []);
   useEffect(() => { const pop = () => setRoute(location.pathname === '/operator' ? 'operator' : 'resident'); window.addEventListener('popstate', pop); return () => window.removeEventListener('popstate', pop); }, []);
   const navigate = (next: string) => { history.pushState({}, '', next === 'operator' ? '/operator' : '/'); setRoute(next); };

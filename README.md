@@ -29,6 +29,8 @@ npm start
 
 Open **http://127.0.0.1:3001**. The production build registers a service worker and caches the app shell after it has loaded successfully. Test offline reopening against this build, not the Vite development server.
 
+When a new build is ready, the app offers **Reload app** or **Later** so edits and voice sessions can finish first. If an older cached version has no update prompt, open **http://127.0.0.1:3001/api/app-refresh** and choose **Update and open app**. This recovery page bypasses the offline navigation cache and activates the latest worker while keeping IndexedDB reports and the active request. Avoid clearing site data to update the interface.
+
 ## What the prototype does
 
 - Saves a resident's SOS to IndexedDB on the device before attempting delivery.
@@ -65,6 +67,8 @@ The default servers bind to loopback for a local demo. A phone accessing a lapto
 6. Reconnect and verify the report is delivered once, then acknowledge it.
 7. Demonstrate voice separately with internet enabled. Use synthetic details, not real emergency or personal information.
 
+For the voice-companion demo, tap **Talk to Saklolo**, describe a fictional incident, then add a correction or landmark. The assistant saves the initial help request before asking for missing details and updates the same report. Ask whether it has been delivered to exercise the read-only status tool. While voice remains connected, acknowledge the report at `/operator`; with **Spoken status updates on**, the companion announces the confirmed change when conversation and playback are idle. **Mute mic** controls input; the spoken-update switch controls unsolicited status announcements. **End voice** closes the session. This requires an explicit tap and internet, with no always-on wake word.
+
 ## Checks
 
 ```powershell
@@ -72,7 +76,7 @@ npm test
 npm run build
 ```
 
-Backend tests cover validation, idempotent delivery, acknowledgement preservation across restart, temporary credential filtering, provider failures, and malformed/cross-site requests. Tests do not call the paid OpenAI API. Live voice testing requires a microphone, browser permission, internet, and an account with access to the configured model.
+Backend tests cover validation, idempotent delivery, acknowledgement preservation across restart, temporary credential filtering, provider failures, and malformed/cross-site requests. Voice announcement tests cover busy-state deferral, status coalescing, deduplication, tool-result suppression, disabling, and cleanup. Tests do not call the paid OpenAI API. Live voice testing requires a microphone, browser permission, internet, and an account with access to the configured model.
 
 Browser QA verified SOS delivery, operator acknowledgement, offline save and production-app reload, automatic reconnection delivery (including while viewing the operator route), and a map marker using simulated geolocation. The resident redesign was checked at 320px and 390px, including progressive report details and reduced-motion behavior. Location QA covers automatic capture, permission-denied fallback, and attaching a fresh fix to an already delivered report.
 

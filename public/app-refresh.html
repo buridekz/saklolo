@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#243e36"><title>Update Saklolo</title><style>
+body{margin:0;min-height:100svh;display:grid;place-items:center;background:#f5f5ef;color:#243e36;font-family:system-ui,sans-serif}main{max-width:380px;padding:32px 24px}h1{font-size:27px;letter-spacing:-.03em}p{font-size:15px;line-height:1.7;color:#526650}button,a{display:inline-block;border:0;border-radius:8px;padding:13px 18px;background:#243e36;color:white;font:inherit;text-decoration:none;cursor:pointer}button:disabled{opacity:.65}small{display:block;font-size:12px;line-height:1.6;color:#526650;margin-top:22px}:focus-visible{outline:3px solid #a66514;outline-offset:3px}[hidden]{display:none!important}
+</style></head><body><main><h1>Load the latest Saklolo</h1><p id="status" role="status">Your saved reports will stay on this device. Save any open edits and finish your voice session before continuing.</p><button id="refresh">Update and open app</button><a id="open" href="/" hidden>Open Saklolo</a><small>This updates the app interface. It does not erase reports or send a new request.</small></main><script>
+const button = document.getElementById('refresh');
+const status = document.getElementById('status');
+function waitForWorker(worker, states) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { cleanup(); reject(new Error('timeout')); }, 25000);
+    function cleanup() { clearTimeout(timer); worker.removeEventListener('statechange', check); }
+    function check() {
+      if (states.includes(worker.state)) { cleanup(); resolve(); }
+      else if (worker.state === 'redundant') { cleanup(); reject(new Error('retry')); }
+    }
+    worker.addEventListener('statechange', check); check();
+  });
+}
+button.addEventListener('click', async () => {
+  button.disabled = true; status.textContent = 'Loading the latest interface. Your saved reports are being kept.';
+  try {
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration('/');
+      if (registration) {
+        await registration.update();
+        if (registration.installing) await waitForWorker(registration.installing, ['installed', 'activated']);
+        if (registration.waiting) {
+          const worker = registration.waiting;
+          const activated = waitForWorker(worker, ['activated']);
+          worker.postMessage({ type: 'SKIP_WAITING' });
+          await activated;
+        }
+      }
+    }
+    location.replace('/');
+  } catch {
+    status.textContent = 'The update could not finish. Check your connection and try again. Your saved reports are still on this device.';
+    button.disabled = false; button.textContent = 'Try again'; document.getElementById('open').hidden = false;
+  }
+});
+</script></body></html>

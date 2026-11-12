@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
-import { ArrowRight, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Waves, WifiOff } from 'lucide-react';
+import { ArrowRight, Check, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Volume2, VolumeX, Waves, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { categories, db, editReport, labels, syncReports, type Category, type Report } from './data';
 import { useDeviceLocation } from './useDeviceLocation';
-import type { VoiceStatus, VoiceTranscript } from './voice';
+import type { VoiceReportState, VoiceStatus, VoiceTranscript } from './voice';
 import './resident.css';
 import LocationPreview from './LocationPreview';
 
@@ -22,7 +22,7 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
   const [landmark, setLandmark] = useState('');
   const gps = useDeviceLocation();
   const location = gps.location;
-  const locationNote = gps.state === 'active' ? gps.stale ? 'Last known location · tap to refresh' : 'Location is on' : gps.state === 'requesting' ? 'Finding your location…' : gps.state === 'denied' ? 'Location permission blocked' : 'Location unavailable';
+  const locationNote = gps.state === 'active' ? gps.stale ? 'Last known location' : 'Location is on' : gps.state === 'requesting' ? 'Finding your location…' : gps.state === 'denied' ? 'Location permission blocked' : 'Location unavailable';
   const [reports, setReports] = useState<Report[]>([]);
   const [reportsLoaded, setReportsLoaded] = useState(false);
   const [message, setMessage] = useState('');
@@ -35,10 +35,14 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>('ended');
   const [transcript, setTranscript] = useState<VoiceTranscript[]>([]);
   const [muted, setMuted] = useState(false);
-  const voice = useRef<{ close: () => void; mute: (muted: boolean) => void } | null>(null);
+  const [spokenUpdates, setSpokenUpdates] = useState(() => localStorage.getItem('saklolo-spoken-updates') !== 'off');
+  const voice = useRef<{ close: () => void; mute: (muted: boolean) => void; notifyReportState: (report: VoiceReportState) => void; setSpokenUpdates: (enabled: boolean) => void } | null>(null);
   const voiceAbort = useRef<AbortController | null>(null);
   const voiceReport = useRef<string | null>(null);
   const activeReport = useRef<string | null>(activeId);
+  const trackingReport = useRef<string | null>(null);
+  const hydratedDraft = useRef<string | null>(null);
+  const reportWrites = useRef<Promise<unknown>>(Promise.resolve());
   const mounted = useRef(true);
   const root = useRef<HTMLDivElement>(null);
   const details = useRef<HTMLDivElement>(null);
@@ -50,8 +54,39 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     }
   }, []);
   const currentReport = reports.find(report => report.id === activeId);
+  const locationHint = currentReport && trackingReport.current !== currentReport.id ? 'Review to update this request’s location' : 'Your location will be included';
+
+  function voiceSnapshot(report: Report): VoiceReportState {
+    return { id: report.id, status: report.status, needsSync: report.needsSync, category: report.category, description: report.description, landmark: report.landmark, locationIncluded: Boolean(report.location), receivedAt: report.receivedAt, acknowledgedAt: report.acknowledgedAt };
+  }
+
+  const readVoiceReport = useCallback(async () => {
+    const report = activeReport.current ? await db.reports.get(activeReport.current) : undefined;
+    return report ? voiceSnapshot(report) : null;
+  }, []);
+
+  useEffect(() => {
+    if (voiceState === 'active' && currentReport) voice.current?.notifyReportState(voiceSnapshot(currentReport));
+  }, [voiceState, currentReport]);
+
+  useEffect(() => {
+    voice.current?.setSpokenUpdates(spokenUpdates);
+  }, [spokenUpdates, voiceState]);
+
+  useEffect(() => {
+    if (!activeId) { hydratedDraft.current = null; return; }
+    if (currentReport && hydratedDraft.current !== currentReport.id) {
+      setCategory(currentReport.category); setDescription(currentReport.description); setLandmark(currentReport.landmark);
+      hydratedDraft.current = currentReport.id;
+    }
+  }, [activeId, currentReport]);
 
   function selectReport(report: Report) {
+    if (activeReport.current !== report.id) {
+      trackingReport.current = null;
+      voiceAbort.current?.abort(); voice.current?.close(); voice.current = null;
+      setVoiceState('idle'); setVoiceStatus('ended'); setTranscript([]);
+    }
     activeReport.current = report.id; setActiveId(report.id);
     localStorage.setItem('saklolo-active-report', report.id);
     setCategory(report.category); setDescription(report.description); setLandmark(report.landmark);
@@ -61,7 +96,7 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
   function startNewRequest() {
     voiceAbort.current?.abort(); voice.current?.close(); voice.current = null;
     setVoiceState('idle'); setVoiceStatus('ended'); setTranscript([]);
-    activeReport.current = null; voiceReport.current = null; setActiveId(null);
+    activeReport.current = null; trackingReport.current = null; voiceReport.current = null; setActiveId(null);
     localStorage.removeItem('saklolo-active-report');
     setCategory('Other'); setDescription(''); setLandmark(''); setMessage(''); setDetailsOpen(false); setLocationOpen(false);
   }
@@ -85,8 +120,8 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
   }, [gps.state]);
 
   useEffect(() => {
-    // An SOS never waits for GPS. Refresh the active incident at most every 10s.
-    if (!gps.location || !gps.capturedAt || !activeReport.current) return;
+    // Track only incidents created during this visit. History keeps its original location.
+    if (!gps.location || !gps.capturedAt || !activeReport.current || trackingReport.current !== activeReport.current) return;
     const id = activeReport.current;
     void db.reports.get(id).then(async report => {
       if (!report || activeReport.current !== id) return;
@@ -117,7 +152,8 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     if (!message) return;
     const media = gsap.matchMedia();
     media.add('(prefers-reduced-motion: no-preference)', () => {
-      gsap.fromTo(root.current!.querySelector('[role="status"]'), { y: 6 }, { y: 0, duration: .25, ease: 'power2.out' });
+      const feedback = root.current?.querySelector('.phone-feedback');
+      if (feedback) gsap.fromTo(feedback, { y: 6 }, { y: 0, duration: .25, ease: 'power2.out' });
     });
     return () => media.revert();
   }, [message]);
@@ -140,20 +176,32 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     } catch { setMessage('Location could not be saved. Retry or add a landmark.'); }
   }
 
-  async function submit(nextCategory: Category, text: string, place: string, source: Report['source']) {
+  function submit(nextCategory: Category, text: string, place: string, source: Report['source'], signal?: AbortSignal) {
+    const target = activeReport.current;
+    const result = reportWrites.current.then(() => {
+      if (signal?.aborted || (target && activeReport.current !== target)) throw new Error('The active request changed. This update was not saved.');
+      return saveRequest(nextCategory, text, place, source);
+    });
+    reportWrites.current = result.catch(() => {});
+    return result;
+  }
+
+  async function saveRequest(nextCategory: Category, text: string, place: string, source: Report['source']) {
     const fix = gps.snapshot();
     const existingId = activeReport.current || (source === 'voice' ? voiceReport.current : null);
-    const report: Report = { id: existingId || crypto.randomUUID(), createdAt: new Date().toISOString(), category: nextCategory, description: text, landmark: place, location: fix.location, locationCapturedAt: fix.capturedAt, revision: 1, source, status: 'pending' };
+    const attachLocation = !existingId || trackingReport.current === existingId;
+    const report: Report = { id: existingId || crypto.randomUUID(), createdAt: new Date().toISOString(), category: nextCategory, description: text, landmark: place, location: attachLocation ? fix.location : null, locationCapturedAt: attachLocation ? fix.capturedAt : null, revision: 1, source, status: 'pending' };
     if (existingId) {
-      await editReport(existingId, { category: nextCategory, description: text, landmark: place, ...(fix.location ? { location: fix.location, locationCapturedAt: fix.capturedAt } : {}) });
+      await editReport(existingId, { category: nextCategory, description: text, landmark: place, ...(attachLocation && fix.location ? { location: fix.location, locationCapturedAt: fix.capturedAt } : {}) });
     } else {
       await db.reports.put(report);
+      trackingReport.current = report.id;
       if (source === 'voice') voiceReport.current = report.id;
     }
     activeReport.current = report.id;
     setActiveId(report.id); localStorage.setItem('saklolo-active-report', report.id);
     const laterFix = gps.snapshot();
-    if (!report.location && laterFix.location) await editReport(report.id, { location: laterFix.location, locationCapturedAt: laterFix.capturedAt });
+    if (attachLocation && !report.location && laterFix.location) await editReport(report.id, { location: laterFix.location, locationCapturedAt: laterFix.capturedAt });
     await refresh();
     setDetailsOpen(false);
     setMessage('Saved on this phone. Trying to reach the demo desk.');
@@ -161,7 +209,7 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     const saved = await db.reports.get(report.id);
     const status = saved?.status || 'pending';
     const result = saved?.needsSync ? 'Changes saved on this phone. Updated details are waiting for delivery.' : status === 'pending' ? 'Saved on this phone. Not delivered yet; we’ll retry while the app is open.' : status === 'acknowledged' ? 'Acknowledged by the demo desk. No real responder has been dispatched.' : 'Delivered to the demo desk. Waiting for an operator to acknowledge.';
-    if (mounted.current) setMessage(result);
+    if (mounted.current && activeReport.current === report.id) setMessage(result);
     return result;
   }
 
@@ -184,10 +232,14 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     try {
       const { startVoice } = await import('./voice');
       const session = await startVoice(async (nextCategory, text, place) => {
+        if (controller.signal.aborted || !mounted.current) throw new Error('Voice session has ended.');
         setCategory(nextCategory); setDescription(text); setLandmark(place);
-        return submit(nextCategory, text, place, 'voice');
+        return submit(nextCategory, text, place, 'voice', controller.signal);
       }, setMessage, {
         signal: controller.signal,
+        getReportState: readVoiceReport,
+        spokenUpdates,
+        reportContext: currentReport ? { category: currentReport.category, description: currentReport.description, landmark: currentReport.landmark } : undefined,
         onStatus: status => { if (!mounted.current || voiceAbort.current !== controller) return; setVoiceStatus(status); if (status === 'ended') { setVoiceState('idle'); voice.current = null; } },
         onTranscript: items => { if (mounted.current && voiceAbort.current === controller) setTranscript(items); }
       });
@@ -197,12 +249,18 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
   }
 
   function toggleMute() { const next = !muted; voice.current?.mute(next); setMuted(next); }
+  function toggleSpokenUpdates() {
+    const next = !spokenUpdates; setSpokenUpdates(next);
+    localStorage.setItem('saklolo-spoken-updates', next ? 'on' : 'off');
+    voice.current?.setSpokenUpdates(next);
+  }
 
   const delivered = currentReport && currentReport.status !== 'pending';
   const acknowledged = currentReport?.status === 'acknowledged';
   const requestTitle = acknowledged ? 'Your request was reviewed' : delivered ? 'Request delivered' : 'Saved on this phone';
   const requestExplanation = acknowledged ? 'The demo desk acknowledged your request. No responder has been dispatched.' : delivered ? 'Waiting for an operator to review your request.' : 'Not delivered yet. Keep the app open; we’ll retry when the desk is reachable.';
   const voiceLabel = muted ? 'Microphone muted' : voiceStatus === 'speaking' ? 'Assistant speaking' : voiceStatus === 'saving' ? 'Saving your report' : voiceState === 'connecting' ? 'Connecting voice…' : 'Listening to you';
+  const conversation = transcript.length > 0 && <section className="voice-transcript" aria-label="Voice conversation"><h2>Live captions</h2><div role="log" aria-live="polite" aria-relevant="additions text">{transcript.slice(-6).map(line => <p key={line.id} className={line.role}><strong>{line.role === 'user' ? 'You' : 'Saklolo'}</strong>{line.text}</p>)}</div></section>;
 
   return <div className="resident-stage">
     <div ref={root} className="phone-app">
@@ -213,10 +271,19 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
       <Tabs value={tab} onValueChange={setTab} className="phone-tabs">
         <TabsContent value="help" className="phone-tab-content">
           <div className={`resident-connection ${connected ? '' : 'is-offline'}`} role="status">{connected ? <span className="online-dot" /> : <WifiOff size={15} />}<span>{connected ? 'Demo desk reachable' : 'Offline · requests wait on this phone'}</span></div>
+          {voiceState !== 'idle' && <section className={`resident-voice-session companion-session ${voiceStatus === 'speaking' && !muted ? 'is-speaking' : ''}`} aria-label="Live voice companion">
+            <div className="voice-session-heading"><Mic size={20} /><h2>Saklolo voice companion</h2><Badge variant="outline">{voiceState === 'active' ? 'Live' : 'Connecting'}</Badge></div>
+            <div className="companion-turn"><span className="companion-symbol">{muted ? <MicOff size={30} /> : voiceStatus === 'speaking' ? <Volume2 size={30} /> : <Mic size={30} />}</span><p className="voice-session-status" role="status">{voiceLabel}</p><p className="voice-session-note">{voiceState === 'connecting' ? 'Allow microphone access to start.' : muted ? 'Your microphone is off. You can still hear the assistant.' : 'Speak naturally. Add details or ask for your request status.'}</p></div>
+            <div className="resident-voice-buttons"><Button variant="outline" aria-pressed={muted} disabled={voiceState !== 'active'} onClick={toggleMute}>{muted ? <MicOff size={18} /> : <Mic size={18} />}{muted ? 'Unmute mic' : 'Mute mic'}</Button><Button variant="outline" onClick={() => void toggleVoice()}><Square size={16} />{voiceState === 'connecting' ? 'Cancel' : 'End voice'}</Button></div>
+            <Button variant="ghost" className="spoken-updates" aria-pressed={spokenUpdates} onClick={toggleSpokenUpdates}>{spokenUpdates ? <Volume2 size={16} /> : <VolumeX size={16} />}Spoken status updates {spokenUpdates ? 'on' : 'off'}</Button>
+            <small>AI voice · internet required · audio is sent to OpenAI</small>
+            {conversation || <p className="companion-caption-placeholder">Your conversation will appear here as you speak.</p>}
+            {currentReport && <div className="companion-request-summary"><div><h3>Your request</h3><Button variant="ghost" onClick={openDetails}>Edit details</Button></div><p>{currentReport.description || 'Your request is saved. You can add details by speaking.'}</p><small>{currentReport.category} assistance{currentReport.landmark ? ` · ${currentReport.landmark}` : ''}</small><p className="companion-saved-status"><CheckCheck size={15} />{currentReport.needsSync ? 'Updated details waiting for delivery' : labels[currentReport.status]}</p></div>}
+          </section>}
           {currentReport ? <section className={`active-request ${delivered ? 'is-delivered' : 'is-pending'}`} aria-label="Active request" data-arrive>
             <span className="request-status-symbol">{acknowledged ? <CheckCheck size={28} /> : delivered ? <Check size={28} /> : <Clock3 size={28} />}</span>
             <h1>{requestTitle}</h1><p className="request-explanation" role="status">{requestExplanation}</p>
-            <div className="request-reference"><span>Request #{currentReport.id.slice(0, 8).toUpperCase()}</span><time>{time(currentReport.createdAt)}</time></div>
+            <div className="request-reference"><span>{currentReport.category} · #{currentReport.id.slice(0, 8).toUpperCase()}</span><time>{time(currentReport.createdAt)}</time></div>
             <ol className="request-progress" aria-label="Request progress">{[
               { name: 'Saved on phone', done: true, detail: time(currentReport.createdAt) },
               { name: 'Delivered to desk', done: Boolean(delivered), detail: currentReport.receivedAt ? time(currentReport.receivedAt) : 'Waiting for connection' },
@@ -226,20 +293,20 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
             <div className="request-location-note"><MapPin size={16} /><span>{currentReport.location ? 'Location included' : currentReport.landmark ? `Landmark: ${currentReport.landmark}` : 'Location missing — add a landmark below'}</span></div>
             <Button variant="outline" className="request-add-info" onClick={openDetails}><Plus size={18} />Add information<ArrowRight size={16} /></Button>
             {currentReport.status === 'pending' && <Button variant="ghost" className="request-retry" disabled={busy} onClick={() => void syncReports()}><RefreshCw size={16} />Retry delivery</Button>}
-          </section> : <><div className="phone-greeting" data-arrive><h1>Need help?</h1><p>Send your location and ask for assistance.</p></div>
+          </section> : voiceState === 'idle' ? <><div className="phone-greeting" data-arrive><h1>Need help?</h1><p>Send your location and ask for assistance.</p></div>
           <div className="sos-area" data-arrive>
-            <div className="sos-orbit"><Button className="sos-circle" aria-label="Send SOS" onClick={() => void send('sos')} disabled={busy}>
+            <div className="sos-orbit"><Button className="sos-circle" aria-label="Send SOS" onClick={() => void send('sos')} disabled={busy || !reportsLoaded}>
               <Radio size={27} strokeWidth={1.7} /><strong>{busy ? 'Saving' : 'SOS'}</strong><span>{!reportsLoaded ? 'Loading requests…' : busy ? 'Please wait…' : 'Request help'}</span>
             </Button></div>
             <p>Tap once. Add more details afterward.</p>
-          </div></>}
+          </div></> : <Button className="companion-sos" disabled={busy || !reportsLoaded} onClick={() => void send('sos')}><Radio size={19} />{busy ? 'Saving…' : 'Send SOS now'}<ArrowRight size={18} /></Button>}
           <div className="phone-actions" data-arrive>
-            {voiceState === 'idle' ? <><Button variant="outline" className="phone-voice" disabled={!connected} onClick={() => void toggleVoice()}><Mic size={20} /><span>{currentReport ? 'Talk about this request' : 'Talk to Saklolo'}</span><ArrowRight size={16} /></Button><p className="voice-privacy">{connected ? 'Internet required · microphone starts when you allow it' : 'Voice needs a connection. You can still save an SOS.'}</p></> : <section className="resident-voice-session" aria-label="Live voice session"><div className="voice-session-heading"><Mic size={20} /><h2>Talk to Saklolo</h2><Badge variant="outline">{voiceState === 'active' ? 'Live' : 'Connecting'}</Badge></div><p className="voice-session-status" role="status"><i />{voiceLabel}</p><p className="voice-session-note">Speak naturally. You can correct any detail.</p><div className="resident-voice-buttons"><Button variant="outline" disabled={voiceState !== 'active'} onClick={toggleMute}>{muted ? <MicOff size={18} /> : <Mic size={18} />}{muted ? 'Unmute' : 'Mute'}</Button><Button variant="outline" onClick={() => void toggleVoice()}><Square size={16} />{voiceState === 'connecting' ? 'Cancel' : 'End voice'}</Button></div><small>Audio is sent to OpenAI while connected.</small></section>}
-            <Button variant="ghost" className="phone-location" aria-expanded={locationOpen} onClick={() => setLocationOpen(!locationOpen)}><LocateFixed size={20} /><span><strong>{locationNote}</strong><small>{location ? `Accuracy ±${Math.round(location.accuracy || 0)} m · ${gps.stale ? 'Review before using' : 'Your location will be included'}` : 'A landmark works too. Review location options.'}</small></span><span className="location-review">{locationOpen ? 'Close' : 'Review'}</span></Button>
+            {voiceState === 'idle' && <><Button variant="outline" className="phone-voice" disabled={!connected || !reportsLoaded} onClick={() => void toggleVoice()}><Mic size={20} /><span>{currentReport ? 'Talk about this request' : 'Talk to Saklolo'}</span><ArrowRight size={16} /></Button><p className="voice-privacy">{connected ? 'Internet required · microphone starts when you allow it' : 'Voice needs a connection. You can still save an SOS.'}</p></>}
+            <Button variant="ghost" className="phone-location" aria-expanded={locationOpen} onClick={() => setLocationOpen(!locationOpen)}><LocateFixed size={20} /><span><strong>{locationNote}</strong><small>{location ? `Accuracy ±${Math.round(location.accuracy || 0)} m · ${gps.stale ? 'Review before using' : locationHint}` : 'A landmark works too. Review location options.'}</small></span><span className="location-review">{locationOpen ? 'Close' : 'Review'}</span></Button>
             {locationOpen && <section className="resident-location-review" aria-label="Review your location">{location ? <><LocationPreview location={location} /><p className="location-coordinates">{location.lat.toFixed(5)}, {location.lng.toFixed(5)}<span>{gps.capturedAt ? `Captured ${time(gps.capturedAt)}` : ''}</span></p><Button variant="outline" className="use-location" onClick={() => void confirmLocation()}><Check size={16} />Use this location</Button></> : <p>{gps.state === 'denied' ? 'Location access is blocked. Allow it in browser permissions, or add a landmark.' : 'We don’t have a GPS fix yet. You can still request help with a landmark.'}</p>}<div className="location-review-actions"><Button variant="ghost" onClick={locate}><RefreshCw size={16} />Refresh GPS</Button><Button variant="ghost" onClick={() => { openDetails(); setLocationOpen(false); }}>Add a landmark</Button></div></section>}
           </div>
-          {transcript.length > 0 && <section className="voice-transcript" aria-label="Voice conversation"><h2>Conversation</h2>{transcript.slice(-6).map(line => <p key={line.id} className={line.role}><strong>{line.role === 'user' ? 'You' : 'Saklolo'}</strong>{line.text}</p>)}</section>}
-          {currentReport?.description && <section className="request-summary"><div><h2>Request details</h2><Button variant="ghost" onClick={openDetails}>Edit</Button></div><p>{currentReport.description}</p><small>{currentReport.category} assistance{currentReport.landmark ? ` · ${currentReport.landmark}` : ''}</small></section>}
+          {voiceState === 'idle' && conversation}
+          {voiceState === 'idle' && currentReport?.description && <section className="request-summary"><div><h2>Request details</h2><Button variant="ghost" onClick={openDetails}>Edit</Button></div><p>{currentReport.description}</p><small>{currentReport.category} assistance{currentReport.landmark ? ` · ${currentReport.landmark}` : ''}</small></section>}
           {message && <div className="phone-feedback" role="status"><Radio size={16} /><p>{message}</p></div>}
           <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen} className="phone-details" data-arrive>
             <CollapsibleTrigger asChild><Button variant="ghost" className="details-trigger" onClick={() => { if (!detailsOpen && currentReport) { setCategory(currentReport.category); setDescription(currentReport.description); setLandmark(currentReport.landmark); } }}><span>{currentReport ? 'Update request details' : 'Add details'} <small>Optional</small></span><ChevronDown size={17} className={detailsOpen ? 'chevron-open' : ''} /></Button></CollapsibleTrigger>
@@ -254,6 +321,7 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
         </TabsContent>
         <TabsContent value="reports" className="phone-tab-content reports-tab">
           <div className="reports-heading" data-arrive><div><h1>Your reports</h1><p>Every request, with a clear status.</p></div><Button variant="ghost" size="icon" aria-label="Refresh reports" onClick={() => void syncReports()}><RefreshCw size={18} /></Button></div>
+          {voiceState !== 'idle' && <section className="companion-background-session" aria-label="Active voice controls"><p><Mic size={17} />{voiceLabel}</p><div><Button variant="outline" onClick={() => setTab('help')}>Back to voice</Button><Button variant="ghost" onClick={() => void toggleVoice()}><Square size={15} />End voice</Button></div></section>}
           {reports.length === 0 ? <div className="phone-empty" data-arrive><span><Clock3 size={30} strokeWidth={1.5} /></span><h2>Nothing to follow up yet</h2><p>Your saved requests and delivery<br />updates will appear here.</p><Button variant="outline" onClick={() => setTab('help')}>Back to help<ArrowRight size={16} /></Button></div> : <div className="phone-reports" data-arrive>{reports.map(report => <article className="phone-report" key={report.id}><div className="report-top"><span className={`report-symbol ${report.status}`}>{report.status === 'acknowledged' ? <CheckCheck size={20} /> : report.status === 'pending' ? <Clock3 size={20} /> : <Radio size={20} />}</span><div><h2>{report.category} assistance</h2><time>{new Date(report.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' })} · {time(report.createdAt)}</time></div></div><p className="report-state">{labels[report.status]}</p>{report.needsSync && <small>Updated details are saved locally; waiting for delivery.</small>}{report.description && <p className="report-copy">{report.description}</p>}{report.landmark && <p className="report-place"><MapPin size={13} />{report.landmark}</p>}{report.status === 'pending' && <small>We’ll retry while the app is open.</small>}<Button variant="ghost" className="open-request" onClick={() => selectReport(report)}>View request<ArrowRight size={16} /></Button></article>)}</div>}
           {message && <div className="phone-feedback" role="status"><Radio size={16} /><p>{message}</p></div>}
         </TabsContent>

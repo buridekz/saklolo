@@ -3,6 +3,7 @@ import { rateLimit } from 'express-rate-limit';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import path from 'node:path';
+import { createLocationLabelService, validCoordinates } from './location-label.mjs';
 
 const editableFields = {
   category: z.enum(['Medical', 'Fire', 'Safety', 'Flood', 'Other']),
@@ -27,7 +28,7 @@ function voiceFailure(status, upstreamCode) {
   return { code: 'voice_provider_unavailable', error: 'OpenAI voice is temporarily unavailable. Retry shortly, or use the SOS button.' };
 }
 
-export function createApp({ database = ':memory:', apiKey = '', model = 'gpt-realtime', notify = () => {}, fetchImpl = fetch, voiceTimeoutMs = 15000 } = {}) {
+export function createApp({ database = ':memory:', apiKey = '', model = 'gpt-realtime', notify = () => {}, fetchImpl = fetch, voiceTimeoutMs = 15000, locationLabelService = createLocationLabelService() } = {}) {
   const app = express();
   app.disable('x-powered-by');
   app.use('/api', (req, res, next) => {
@@ -44,7 +45,17 @@ export function createApp({ database = ':memory:', apiKey = '', model = 'gpt-rea
   const save = report => db.prepare('INSERT INTO reports(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(report.id, JSON.stringify(report));
   let lastVoiceAttempt = null;
   app.get('/api/health', (_req, res) => res.json({ ok: true, voiceConfigured: Boolean(apiKey), mode: 'local-demo' }));
+  // /api is excluded from the offline navigation fallback, even in older builds.
+  // This lets a stale installed app activate its waiting update without touching reports.
+  app.get('/api/app-refresh', (_req, res) => res.sendFile(path.resolve('dist/app-refresh.html')));
   app.get('/api/voice/status', (_req, res) => res.json({ configured: Boolean(apiKey), model, requiresInternet: true, transport: 'websocket', microphoneRequiresSecureContext: true, lastAttempt: lastVoiceAttempt }));
+  app.get('/api/location-label', async (req, res) => {
+    const lat = typeof req.query.lat === 'string' && req.query.lat.trim() ? Number(req.query.lat) : NaN;
+    const lng = typeof req.query.lng === 'string' && req.query.lng.trim() ? Number(req.query.lng) : NaN;
+    if (!validCoordinates(lat, lng)) return res.status(400).json({ error: 'Valid latitude and longitude are required.' });
+    try { res.json(await locationLabelService(lat, lng)); }
+    catch { res.status(503).json({ label: null, available: false }); }
+  });
   app.get('/api/reports', (_req, res) => res.json(db.prepare('SELECT body FROM reports ORDER BY rowid DESC').all().map(row => JSON.parse(row.body))));
   app.post('/api/reports', (req, res) => {
     const parsed = reportSchema.safeParse(req.body);
@@ -116,8 +127,10 @@ export function createApp({ database = ':memory:', apiKey = '', model = 'gpt-rea
     } finally { clearTimeout(timeout); res.off('close', onClose); }
   });
   app.use('/api', (_req, res) => res.status(404).json({ error: 'Endpoint not found.' }));
-  app.use(express.static(path.resolve('dist')));
-  app.get('/{*path}', (_req, res, next) => res.sendFile(path.resolve('dist/index.html'), err => err && next(err)));
+  app.use(express.static(path.resolve('dist'), { setHeaders(res, file) {
+    if (file.endsWith('.html') || file.endsWith('sw.js') || file.endsWith('registerSW.js')) res.set('Cache-Control', 'no-store');
+  } }));
+  app.get('/{*path}', (_req, res, next) => { res.set('Cache-Control', 'no-store'); res.sendFile(path.resolve('dist/index.html'), err => err && next(err)); });
   app.use((err, _req, res, _next) => {
     if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Request must contain valid JSON.' });
     if (err.status === 413) return res.status(413).json({ error: 'Report is too large.' });

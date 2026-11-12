@@ -25,7 +25,12 @@ export function createVoiceAudio(onPlayback: (playing: boolean) => void) {
       source = context.createMediaStreamSource(stream);
       capture = new AudioWorkletNode(context, 'saklolo-pcm-capture', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1], channelCount: 1, channelCountMode: 'explicit' });
       capture.port.onmessage = event => {
-        if (!closed && !muted && event.data instanceof ArrayBuffer) onChunk(event.data);
+        if (!closed && event.data instanceof ArrayBuffer) {
+          // Silence lets server VAD finish a turn if mute is pressed mid-speech.
+          // Microphone samples are replaced before anything is transmitted.
+          if (muted) new Uint8Array(event.data).fill(0);
+          onChunk(event.data);
+        }
       };
       source.connect(capture);
       capture.connect(context.destination);
