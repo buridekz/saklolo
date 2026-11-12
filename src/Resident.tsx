@@ -242,12 +242,16 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     try {
       await submit(category, description.trim(), landmark.trim(), source);
       root.current?.scrollIntoView({ behavior: 'instant', block: 'start' });
+      // Like dialling an emergency line: when online, SOS goes straight to the voice call-taker,
+      // which fills in this same report. Offline, SOS stays a one-tap save.
+      if (source === 'sos' && connected && voiceState === 'idle') void toggleVoice({ category, description: description.trim(), landmark: landmark.trim() });
     }
     catch { setMessage('Could not save this report. Please try again.'); }
     finally { if (mounted.current) setBusy(false); }
   }
 
-  async function toggleVoice() {
+  /** `afterSos` carries the report just saved by an SOS tap, so the assistant opens as a call-taker for it. */
+  async function toggleVoice(afterSos?: { category: Category; description: string; landmark: string }) {
     if (voiceState !== 'idle') { voiceAbort.current?.abort(); voice.current?.close(); voice.current = null; setVoiceState('idle'); setVoiceStatus('ended'); setMessage('Voice session ended. Your saved reports are in Reports.'); return; }
     const controller = new AbortController(); voiceAbort.current = controller;
     voiceReport.current = activeReport.current;
@@ -262,13 +266,21 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
         signal: controller.signal,
         getReportState: readVoiceReport,
         spokenUpdates,
-        reportContext: currentReport ? { category: currentReport.category, description: currentReport.description, landmark: currentReport.landmark } : undefined,
+        reportContext: afterSos ?? (currentReport ? { category: currentReport.category, description: currentReport.description, landmark: currentReport.landmark } : undefined),
+        afterSos: Boolean(afterSos),
         onStatus: status => { if (!mounted.current || voiceAbort.current !== controller) return; setVoiceStatus(status); if (status === 'ended') { setVoiceState('idle'); voice.current = null; } },
         onTranscript: items => { if (mounted.current && voiceAbort.current === controller) setTranscript(items); }
       });
       if (!mounted.current || controller.signal.aborted) { session.close(); return; }
       voice.current = session; setVoiceState('active'); setMessage('Voice connected. Speak naturally; you can interrupt the assistant. Audio is sent to OpenAI.');
-    } catch (error) { if (mounted.current && !controller.signal.aborted) { setVoiceState('idle'); setMessage(error instanceof Error ? error.message : 'Voice unavailable. You can still send an SOS.'); } }
+    } catch (error) {
+      if (mounted.current && !controller.signal.aborted) {
+        setVoiceState('idle');
+        setMessage(afterSos
+          ? 'Your SOS was still sent. Voice isn’t available right now; tap “Talk about this request” to try again, or add details by typing.'
+          : error instanceof Error ? error.message : 'Voice unavailable. You can still send an SOS.');
+      }
+    }
   }
 
   function toggleMute() { const next = !muted; voice.current?.mute(next); setMuted(next); }
