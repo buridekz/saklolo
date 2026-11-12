@@ -11,6 +11,7 @@ import {
   CATEGORY_ICONS, STALE_LOCATION_MS, age, ageLabel, clockTime, fullTime, isOpen, locationLine, prefersReducedMotion,
   shortId, sourceLabel,
 } from './format';
+import { nearbyReports, trustSignals } from './signals';
 import './operator.css';
 
 type StatusFilter = 'all' | 'review' | 'acknowledged';
@@ -111,6 +112,9 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
     for (const report of reports) counts.set(report.category, (counts.get(report.category) || 0) + 1);
     return counts;
   }, [reports]);
+
+  // Independent reports close in space and time; used for corroboration.
+  const nearbyCounts = useMemo(() => new Map(reports.map(report => [report.id, nearbyReports(report, reports).length])), [reports]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -336,6 +340,9 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                                 <StatusPill report={report} />
                                 <span className="ops-source">{report.source === 'voice' ? <Mic size={12} /> : <Smartphone size={12} />}{sourceLabel(report)}</span>
                                 {(report.revision || 1) > 1 && <span className="ops-source">Rev {report.revision}</span>}
+                                {(nearbyCounts.get(report.id) || 0) > 0 && (
+                                  <span className="ops-source ops-corroborated" title="Other reports within 300 m and an hour">+{nearbyCounts.get(report.id)} nearby</span>
+                                )}
                               </span>
                             </span>
                           </button>
@@ -376,6 +383,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                   now={now}
                   busy={busyId === drawerReport.id}
                   updated={fresh.has(drawerReport.id)}
+                  nearby={nearbyCounts.get(drawerReport.id) || 0}
                   nextOpen={nextOpen}
                   onAcknowledge={() => void acknowledge(drawerReport)}
                   onNext={() => nextOpen && choose(nextOpen.id)}
@@ -438,9 +446,12 @@ type DetailProps = {
   onNext: () => void;
   onCopyFailed: () => void;
   onClose: () => void;
+  nearby: number;
 };
 
-function IncidentDetail({ report, now, busy, updated, nextOpen, onAcknowledge, onNext, onCopyFailed, onClose }: DetailProps) {
+function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknowledge, onNext, onCopyFailed, onClose }: DetailProps) {
+  const signals = trustSignals(report, nearby, now);
+  const strong = signals.filter(signal => signal.state === 'strong').length;
   const [copied, setCopied] = useState(false);
   const Icon = CATEGORY_ICONS[report.category] || CATEGORY_ICONS.Other;
   const open = isOpen(report);
@@ -534,6 +545,27 @@ function IncidentDetail({ report, now, busy, updated, nextOpen, onAcknowledge, o
               </div>
             )}
           </div>
+        </section>
+
+        <section className="ops-block" aria-labelledby="ops-signals-title">
+          <div className="ops-block-head">
+            <h3 id="ops-signals-title">Trust signals</h3>
+            <span>{strong} of {signals.length} strong</span>
+          </div>
+          <ul className="ops-signals">
+            {signals.map(signal => (
+              <li key={signal.id} className={`is-${signal.state}`}>
+                <span className="ops-signal-mark" aria-hidden>
+                  {signal.state === 'strong' ? <Check size={11} strokeWidth={3} /> : signal.state === 'partial' ? <CircleDashed size={11} /> : <X size={11} strokeWidth={2.5} />}
+                </span>
+                <span className="ops-signal-text">
+                  <strong>{signal.label}<span className="ops-visually-hidden"> ({signal.state})</span></strong>
+                  <small>{signal.detail}</small>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <p className="ops-signals-note">Signals help you judge a report. None of them proves it real or fake, so never hold back help while waiting for them.</p>
         </section>
 
         <section className="ops-block">
