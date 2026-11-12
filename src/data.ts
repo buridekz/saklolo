@@ -58,8 +58,14 @@ export function setDemoOffline(on: boolean) {
   if (!on) void syncReports();
 }
 
+/** True when the device itself reports no network (Wi-Fi and data off). Matches the offline banner. */
+const deviceOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+
 export function syncReports() {
-  if (demoOffline()) return Promise.resolve();
+  // Wait instead of sending when the device is offline. The 'online' event triggers a sync on reconnect.
+  // (A server on the same laptop stays reachable with Wi-Fi off, so without this the banner said
+  // "Offline" while reports were still being delivered.)
+  if (demoOffline() || deviceOffline()) return Promise.resolve();
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
     for (const report of (await db.reports.toArray()).filter(report => report.status === 'pending' || report.needsSync)) {
