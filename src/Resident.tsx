@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
-import { ArrowRight, Check, Copy, MessageSquareText, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Truck, Volume2, VolumeX, Waves, WifiOff } from 'lucide-react';
+import { ArrowRight, Check, Copy, MessageSquareText, CheckCheck, ChevronDown, CircleHelp, Clock3, Flame, HeartPulse, House, LocateFixed, MapPin, Mic, MicOff, Plus, Radio, RefreshCw, Shield, Square, Truck, Volume2, VolumeX, Waves, Wifi, WifiOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { agencyNames, categories, db, dispatchStages, editReport, labels, stageLabels, syncReports, type Category, type Report } from './data';
+import { agencyNames, categories, db, demoOffline, dispatchStages, editReport, setDemoOffline, labels, stageLabels, syncReports, type Category, type Report } from './data';
 import { useDeviceLocation } from './useDeviceLocation';
 import { smsBody, smsHref } from './sms';
 
@@ -43,7 +43,15 @@ import LocationPreview from './LocationPreview';
 const icons = { Medical: HeartPulse, Fire: Flame, Safety: Shield, Flood: Waves, Other: CircleHelp };
 const time = (value: string) => new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-export default function Resident({ connected }: { connected: boolean; openDesk: () => void }) {
+export default function Resident({ connected: deskReachable }: { connected: boolean; openDesk: () => void }) {
+  // DEMO ONLY: the 'Simulate no signal' switch makes the app behave exactly as if the phone lost data.
+  const [simOffline, setSimOffline] = useState(demoOffline);
+  useEffect(() => {
+    const update = () => setSimOffline(demoOffline());
+    window.addEventListener('demo-offline-changed', update); window.addEventListener('storage', update);
+    return () => { window.removeEventListener('demo-offline-changed', update); window.removeEventListener('storage', update); };
+  }, []);
+  const connected = deskReachable && !simOffline;
   const [category, setCategory] = useState<Category>('Other');
   const [description, setDescription] = useState('');
   const [intake, setIntake] = useState<{ id: string; step: number } | null>(null);
@@ -342,7 +350,12 @@ export default function Resident({ connected }: { connected: boolean; openDesk: 
     <div ref={root} className="phone-app">
       <div className="phone-topbar">
         <a href="/" className="phone-brand" aria-label="Saklolo home"><span><Plus size={20} strokeWidth={2.5} /></span>Saklolo</a>
-        <Badge variant="outline" className="phone-demo">Prototype</Badge>
+        <div className="phone-top-actions">
+          <button type="button" className={`demo-signal ${simOffline ? 'is-off' : ''}`} aria-pressed={simOffline} onClick={() => setDemoOffline(!simOffline)} title="Demo control: pretend this phone has no mobile data">
+            {simOffline ? <WifiOff size={14} /> : <Wifi size={14} />}<span>{simOffline ? 'No signal' : 'Signal'}</span><small>demo</small>
+          </button>
+          <Badge variant="outline" className="phone-demo">Prototype</Badge>
+        </div>
       </div>
       <Tabs value={tab} onValueChange={setTab} className="phone-tabs">
         <TabsContent value="help" className="phone-tab-content">

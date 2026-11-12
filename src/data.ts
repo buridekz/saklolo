@@ -43,7 +43,23 @@ async function acceptRemote(remote: Report) {
 function patchBody(report: Report) {
   return { revision: report.revision || 1, category: report.category, description: report.description, landmark: report.landmark, location: report.location, locationCapturedAt: report.locationCapturedAt || null };
 }
+/**
+ * DEMO ONLY: "Simulate no signal" switch. Stored in localStorage so it applies to every tab of
+ * this browser; otherwise the desk tab (same storage) would quietly deliver the resident's
+ * "offline" reports. While on, nothing on this device syncs; logging an SMS on the desk still works.
+ */
+const DEMO_OFFLINE_KEY = 'saklolo-demo-offline';
+export function demoOffline() {
+  try { return localStorage.getItem(DEMO_OFFLINE_KEY) === 'on'; } catch { return false; }
+}
+export function setDemoOffline(on: boolean) {
+  try { if (on) localStorage.setItem(DEMO_OFFLINE_KEY, 'on'); else localStorage.removeItem(DEMO_OFFLINE_KEY); } catch { /* Optional demo control. */ }
+  window.dispatchEvent(new Event('demo-offline-changed'));
+  if (!on) void syncReports();
+}
+
 export function syncReports() {
+  if (demoOffline()) return Promise.resolve();
   if (syncPromise) return syncPromise;
   syncPromise = (async () => {
     for (const report of (await db.reports.toArray()).filter(report => report.status === 'pending' || report.needsSync)) {
