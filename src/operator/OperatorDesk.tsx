@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { io } from 'socket.io-client';
 import {
-  ArrowRight, Check, CheckCheck, CircleDashed, Clock3, Copy, ExternalLink, Inbox, LayoutDashboard, LoaderCircle,
+  ArrowRight, BadgeCheck, Check, CheckCheck, CircleDashed, Flag, MapPinCheck, Phone, RotateCcw, Users, Clock3, Copy, ExternalLink, Inbox, LayoutDashboard, LoaderCircle,
   MapPin, Mic, Plus, Radio, RefreshCw, Search, ShieldCheck, Smartphone, Timer, Truck, Wifi, WifiOff, X,
 } from 'lucide-react';
 import { api, categories, type Category, type Report } from '../data';
@@ -9,7 +9,7 @@ import IncidentMap from './IncidentMap';
 import { useCountUp, useMediaQuery, useNow } from './hooks';
 import {
   CATEGORY_ICONS, STALE_LOCATION_MS, age, ageLabel, clockTime, fullTime, isOpen, locationLine, prefersReducedMotion,
-  shortId, sourceLabel,
+  shortId, sourceLabel, VERIFICATION_LABELS, verificationOf, type VerificationStatus,
 } from './format';
 import { nearbyReports, trustSignals } from './signals';
 import './operator.css';
@@ -192,6 +192,22 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
     void refresh();
   }
 
+  async function verify(report: Report, status: VerificationStatus, note: string) {
+    try {
+      const saved = await api<Report>(`/api/reports/${report.id}/verification`, { method: 'POST', body: JSON.stringify({ status, note }) });
+      setReports(list => list.map(item => item.id === saved.id ? saved : item));
+      pushToast({
+        tone: status === 'flagged' ? 'info' : 'success',
+        title: `${VERIFICATION_LABELS[status]} · #${shortId(report)}`,
+        body: status === 'flagged' ? 'The report stays in the queue and on the map.' : undefined,
+      });
+      return true;
+    } catch (cause) {
+      pushToast({ tone: 'error', title: 'Verification not saved', body: cause instanceof Error ? cause.message : 'Try again.' });
+      return false;
+    }
+  }
+
   async function acknowledge(report: Report) {
     setBusyId(report.id);
     try {
@@ -343,6 +359,10 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                                 {(nearbyCounts.get(report.id) || 0) > 0 && (
                                   <span className="ops-source ops-corroborated" title="Other reports within 300 m and an hour">+{nearbyCounts.get(report.id)} nearby</span>
                                 )}
+                                {verificationOf(report)?.status === 'flagged' && <span className="ops-source ops-flagged"><Flag size={11} />Flagged</span>}
+                                {['confirmed', 'corroborated', 'field_checked'].includes(verificationOf(report)?.status || '') && (
+                                  <span className="ops-source ops-corroborated" title={VERIFICATION_LABELS[verificationOf(report)!.status]}><BadgeCheck size={12} />Verified</span>
+                                )}
                               </span>
                             </span>
                           </button>
@@ -386,6 +406,7 @@ export default function OperatorDesk({ connected, onNavigate }: { connected: boo
                   nearby={nearbyCounts.get(drawerReport.id) || 0}
                   nextOpen={nextOpen}
                   onAcknowledge={() => void acknowledge(drawerReport)}
+                  onVerify={(status, note) => verify(drawerReport, status, note)}
                   onNext={() => nextOpen && choose(nextOpen.id)}
                   onClose={closeDrawer}
                   onCopyFailed={() => pushToast({ tone: 'error', title: 'Copy unavailable', body: 'This browser blocked clipboard access.' })}
@@ -447,9 +468,80 @@ type DetailProps = {
   onCopyFailed: () => void;
   onClose: () => void;
   nearby: number;
+  onVerify: (status: VerificationStatus, note: string) => Promise<boolean>;
 };
 
-function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknowledge, onNext, onCopyFailed, onClose }: DetailProps) {
+const VERIFY_OPTIONS: { status: VerificationStatus; label: string; Icon: typeof Phone }[] = [
+  { status: 'confirmed', label: 'Confirmed with resident', Icon: Phone },
+  { status: 'corroborated', label: 'Corroborated', Icon: Users },
+  { status: 'field_checked', label: 'Checked on site', Icon: MapPinCheck },
+  { status: 'flagged', label: 'Flag as likely prank', Icon: Flag },
+];
+
+function VerificationPanel({ report, now, onVerify }: { report: Report; now: number; onVerify: DetailProps['onVerify'] }) {
+  const verification = verificationOf(report);
+  const current = verification?.status ?? 'unverified';
+  const [choice, setChoice] = useState<VerificationStatus | null>(null);
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const needsReason = choice === 'flagged';
+  const canSave = Boolean(choice) && !saving && (!needsReason || note.trim().length >= 3);
+  const options = current === 'unverified' ? VERIFY_OPTIONS : [...VERIFY_OPTIONS, { status: 'unverified' as const, label: 'Reset', Icon: RotateCcw }];
+
+  async function save() {
+    if (!choice || !canSave) return;
+    setSaving(true);
+    const ok = await onVerify(choice, note.trim());
+    setSaving(false);
+    if (ok) { setChoice(null); setNote(''); }
+  }
+
+  return (
+    <section className="ops-block" aria-labelledby="ops-verify-title">
+      <div className="ops-block-head">
+        <h3 id="ops-verify-title">Verification</h3>
+        <span className={`ops-verify-chip is-${current}`}>{VERIFICATION_LABELS[current]}</span>
+      </div>
+      {verification?.note && <p className="ops-verify-note">“{verification.note}” · {ageLabel(verification.updatedAt, now)}</p>}
+      <div className="ops-verify-options" role="group" aria-label="Record how this report was verified">
+        {options.map(({ status, label, Icon }) => (
+          <button
+            key={status}
+            type="button"
+            className={status === 'flagged' ? 'is-flag' : undefined}
+            aria-pressed={choice === status}
+            disabled={status === current && status !== 'flagged'}
+            onClick={() => setChoice(selected => selected === status ? null : status)}
+          >
+            <Icon size={14} />{label}
+          </button>
+        ))}
+      </div>
+      {choice && (
+        <div className="ops-verify-form">
+          <textarea
+            aria-label={needsReason ? 'Reason for flagging (required)' : 'Note (optional)'}
+            placeholder={needsReason ? 'Reason, e.g. caller laughed and hung up on callback' : 'Note, e.g. resident answered callback at 10:42'}
+            maxLength={280}
+            rows={2}
+            value={note}
+            onChange={event => setNote(event.target.value)}
+            autoFocus
+          />
+          <div className="ops-verify-actions">
+            <small>{needsReason ? 'Flagging keeps the report visible. A reason is required.' : 'Recorded with the time. Never dispatches anyone.'}</small>
+            <button type="button" className="ops-button ops-button-quiet" onClick={() => { setChoice(null); setNote(''); }}>Cancel</button>
+            <button type="button" className="ops-button ops-acknowledge" disabled={!canSave} onClick={() => void save()}>
+              {saving ? <><LoaderCircle size={15} className="ops-spinner" /> Saving…</> : 'Save'}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknowledge, onNext, onCopyFailed, onClose, onVerify }: DetailProps) {
   const signals = trustSignals(report, nearby, now);
   const strong = signals.filter(signal => signal.state === 'strong').length;
   const [copied, setCopied] = useState(false);
@@ -567,6 +659,8 @@ function IncidentDetail({ report, now, busy, updated, nearby, nextOpen, onAcknow
           </ul>
           <p className="ops-signals-note">Signals help you judge a report. None of them proves it real or fake, so never hold back help while waiting for them.</p>
         </section>
+
+        <VerificationPanel report={report} now={now} onVerify={onVerify} />
 
         <section className="ops-block">
           <h3>Timeline</h3>

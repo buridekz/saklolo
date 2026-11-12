@@ -69,6 +69,22 @@ export function createApp({ database = ':memory:', apiKey = '', model = 'gpt-rea
     if (report.status !== 'acknowledged') { report.status = 'acknowledged'; report.acknowledgedAt = new Date().toISOString(); save(report); notify(); }
     res.json(report);
   });
+  // Operator verification is a separate judgement from review and dispatch. It never changes the
+  // report's status or content, and flagging requires a reason so the decision stays accountable.
+  const verificationSchema = z.object({
+    status: z.enum(['unverified', 'confirmed', 'corroborated', 'field_checked', 'flagged']),
+    note: z.string().trim().max(280).default(''),
+  }).strict().refine(value => value.status !== 'flagged' || value.note.length >= 3, { message: 'Give a reason when flagging a report.' });
+  app.post('/api/reports/:id/verification', (req, res) => {
+    const report = get(req.params.id);
+    if (!report) return res.status(404).json({ error: 'Report not found.' });
+    const parsed = verificationSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.some(issue => issue.message.startsWith('Give a reason')) ? 'Give a reason when flagging a report.' : 'Invalid verification. Choose a status and keep the note under 280 characters.' });
+    const entry = { ...parsed.data, updatedAt: new Date().toISOString() };
+    report.verification = entry;
+    report.verificationHistory = [...(report.verificationHistory || []), entry].slice(-20);
+    save(report); notify(); res.json(report);
+  });
   app.post('/api/voice/session', rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: 'draft-8', legacyHeaders: false, message: { code: 'voice_session_limit', error: 'Too many voice sessions. Wait a minute, or use the SOS button.' } }), async (_req, res) => {
     if (!apiKey) return res.status(503).json({ code: 'voice_not_configured', error: 'Voice is not configured. You can still send an SOS.' });
     const controller = new AbortController();

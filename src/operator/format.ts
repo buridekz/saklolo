@@ -44,5 +44,20 @@ export const locationLine = (report: Report) =>
 export const sourceLabel = (report: Report) =>
   report.source === 'voice' ? 'Voice' : report.source === 'sos' ? 'SOS' : 'Form';
 
+export type VerificationStatus = 'unverified' | 'confirmed' | 'corroborated' | 'field_checked' | 'flagged';
+export type Verification = { status: VerificationStatus; note: string; updatedAt: string };
+
+/** Operator verification, stored by the server alongside the report (not part of the shared Report type). */
+export const verificationOf = (report: Report): Verification | undefined =>
+  (report as Report & { verification?: Verification }).verification;
+
+export const VERIFICATION_LABELS: Record<VerificationStatus, string> = {
+  unverified: 'Not yet verified',
+  confirmed: 'Confirmed with resident',
+  corroborated: 'Corroborated',
+  field_checked: 'Checked on site',
+  flagged: 'Flagged as likely prank',
+};
+
 export const prefersReducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;

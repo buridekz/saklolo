@@ -1048,6 +1048,54 @@
 .ops-signal-text small { display: block; margin-top: 1px; font-size: 12px; line-height: 1.45; color: var(--ops-muted); }
 .ops-signals-note { margin-top: 8px; font-size: 12px; line-height: 1.5; color: var(--ops-faint); }
 .ops-corroborated { padding: 0 7px; height: 20px; border-radius: 999px; background: var(--ops-ok-soft); color: var(--ops-ok-ink); font-weight: 600; }
+.ops-flagged { gap: 4px; padding: 0 7px; height: 20px; border-radius: 999px; background: var(--ops-amber-soft); color: var(--ops-amber); font-weight: 600; }
+
+/* Verification */
+.ops-verify-chip { padding: 2px 9px; border-radius: 999px; background: #eef0ec; color: var(--ops-muted); }
+.ops-block-head > .ops-verify-chip.is-confirmed,
+.ops-block-head > .ops-verify-chip.is-corroborated,
+.ops-block-head > .ops-verify-chip.is-field_checked { background: var(--ops-ok-soft); color: var(--ops-ok-ink); }
+.ops-block-head > .ops-verify-chip.is-flagged { background: var(--ops-amber-soft); color: var(--ops-amber); }
+.ops-verify-note { margin-bottom: 8px; font-size: 13px; line-height: 1.5; color: var(--ops-ink); overflow-wrap: anywhere; }
+.ops-verify-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.ops-verify-options button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--ops-line);
+  border-radius: 8px;
+  background: var(--ops-surface);
+  color: var(--ops-green);
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 120ms var(--ops-ease-out);
+}
+.ops-verify-options button:active:not(:disabled) { transform: scale(0.97); }
+.ops-verify-options button.is-flag { color: var(--ops-amber); }
+.ops-verify-options button[aria-pressed='true'] { background: var(--ops-green); border-color: var(--ops-green); color: #fff; }
+.ops-verify-options button.is-flag[aria-pressed='true'] { background: var(--ops-amber); border-color: var(--ops-amber); }
+.ops-verify-options button:disabled { opacity: 0.45; }
+@media (hover: hover) and (pointer: fine) {
+  .ops-verify-options button:not([aria-pressed='true']):hover:not(:disabled) { background: #f2f5ef; }
+}
+.ops-verify-form { margin-top: 10px; animation: ops-rise 200ms var(--ops-ease-out) both; }
+.ops-shell .ops-verify-form textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--ops-line);
+  border-radius: var(--ops-radius-control);
+  font-size: 13.5px;
+  line-height: 1.5;
+  caret-color: var(--ops-green);
+  resize: vertical;
+}
+.ops-verify-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.ops-verify-actions small { flex: 1 1 160px; font-size: 12px; color: var(--ops-muted); }
+.ops-verify-actions .ops-button { height: 36px; }
+.ops-verify-actions .ops-acknowledge { flex: none; }
+
 .ops-visually-hidden {
   position: absolute;
   width: 1px;

@@ -146,3 +146,39 @@ test('report revisions update live location and details without reversing acknow
     assert.equal(notifications, 4);
   });
 });
+
+test('operator verification is recorded with a history and never changes review or report content', async () => {
+  let notifications = 0;
+  await runServer({ notify: () => { notifications += 1; } }, async base => {
+    const send = (url, method, data) => fetch(base + url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    const report = { id: randomUUID(), createdAt: new Date().toISOString(), category: 'Fire', description: 'Test smoke', landmark: 'Test hall', location: null, source: 'sos' };
+    const route = `/api/reports/${report.id}/verification`;
+    assert.equal((await send(route, 'POST', { status: 'confirmed' })).status, 404);
+    assert.equal((await send('/api/reports', 'POST', { ...report, verification: { status: 'confirmed' } })).status, 201);
+    const created = (await (await fetch(base + '/api/reports')).json())[0];
+    assert.equal(created.verification, undefined, 'residents cannot self-verify on submission');
+
+    assert.equal((await send(route, 'POST', { status: 'flagged', note: '' })).status, 400, 'flagging requires a reason');
+    assert.equal((await send(route, 'POST', { status: 'real' })).status, 400);
+    assert.equal((await send(route, 'POST', { status: 'confirmed', note: 'x'.repeat(281) })).status, 400);
+    assert.equal((await send(route, 'POST', { status: 'confirmed', extra: true })).status, 400);
+
+    const flagged = await (await send(route, 'POST', { status: 'flagged', note: '  Caller laughed and hung up  ' })).json();
+    assert.equal(flagged.verification.status, 'flagged');
+    assert.equal(flagged.verification.note, 'Caller laughed and hung up');
+    assert.ok(flagged.verification.updatedAt);
+    assert.equal(flagged.status, 'delivered', 'flagging never acknowledges, hides or deletes a report');
+    assert.equal(flagged.description, 'Test smoke');
+
+    await send(`/api/reports/${report.id}/acknowledge`, 'POST', {});
+    const confirmed = await (await send(route, 'POST', { status: 'confirmed', note: 'Resident answered callback' })).json();
+    assert.equal(confirmed.status, 'acknowledged');
+    assert.deepEqual(confirmed.verificationHistory.map(entry => entry.status), ['flagged', 'confirmed']);
+
+    assert.equal((await send(`/api/reports/${report.id}`, 'PATCH', { revision: 2, verification: { status: 'confirmed' } })).status, 400, 'residents cannot verify through edits');
+    const edited = await (await send(`/api/reports/${report.id}`, 'PATCH', { revision: 2, description: 'Test smoke, now visible flames' })).json();
+    assert.equal(edited.verification.status, 'confirmed', 'resident edits keep the operator verification');
+    assert.equal((await (await fetch(base + '/api/reports')).json()).length, 1);
+    assert.equal(notifications, 5);
+  });
+});
