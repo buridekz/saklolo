@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Resident from './Resident';
 import OperatorDesk from './operator/OperatorDesk';
+import { io } from 'socket.io-client';
 import { api, syncReports } from './data';
 
 export default function App() {
@@ -9,8 +10,12 @@ export default function App() {
   useEffect(() => {
     const sync = () => void syncReports();
     sync(); const timer = setInterval(sync, 5000);
+    // Pull desk changes (acknowledgement, verification) the moment the server announces them;
+    // the interval above remains the fallback when the live connection is down.
+    const socket = io();
+    socket.on('reports:changed', sync);
     window.addEventListener('online', sync);
-    return () => { clearInterval(timer); window.removeEventListener('online', sync); };
+    return () => { clearInterval(timer); socket.disconnect(); window.removeEventListener('online', sync); };
   }, []);
   useEffect(() => {
     let active = true;
