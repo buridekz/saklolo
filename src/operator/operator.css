@@ -849,12 +849,13 @@
 .ops-map-popup > strong { font-size: 14px; color: var(--ops-green); }
 .ops-map-popup > p { margin: 6px 0 4px !important; font-size: 12px !important; line-height: 1.5; color: var(--ops-muted); }
 .ops-map-popup > button {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   width: 100%;
   margin-top: 6px;
-  padding: 9px 10px 9px 12px;
+  padding: 9px 10px;
   border: 1px solid var(--ops-line-soft);
-  border-left: 3px solid var(--ops-red);
   border-radius: 8px;
   background: #f6f8f3;
   color: var(--ops-green);
@@ -863,7 +864,17 @@
   text-align: left;
   transition: background-color 150ms ease, transform 120ms var(--ops-ease-out);
 }
-.ops-map-popup > button.is-ack { border-left-color: var(--ops-ok); }
+/* Status dot instead of a side stripe: same red/green meaning, quieter. */
+.ops-map-popup > button::before {
+  content: '';
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ops-red);
+  transform: translateY(-1px);
+}
+.ops-map-popup > button.is-ack::before { background: var(--ops-ok); }
 .ops-map-popup > button:active { transform: scale(0.98); }
 
 /* ───────────── Detail drawer (bottom sheet on small screens) ───────────── */
